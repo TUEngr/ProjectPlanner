@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Planner</title>
+  <meta name="description" content="Plan projects with tasks, dependencies, and a Gantt chart with critical path. Plans are stored in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2' width='8' height='3' fill='%232563eb'/%3E%3Crect x='5' y='7' width='9' height='3' fill='%23dc2626'/%3E%3Crect x='3' y='12' width='6' height='3' fill='%232563eb'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Project Planner</div>
+    <button id="plan-name" class="plan-name" title="Plan settings">Untitled</button>
+    <nav class="actions">
+      <button id="btn-plans" title="Open, create, or delete plans">Plans</button>
+      <button id="btn-settings" class="edit-only" title="Project start date and holidays">Settings</button>
+      <button id="btn-export" title="Download this plan as a JSON file">Save file</button>
+      <button id="btn-import" class="edit-only" title="Load a plan from a JSON file">Open file</button>
+      <button id="btn-share" title="Create a read-only link to this plan">Share link</button>
+      <button id="btn-print" title="Print or save the Gantt chart as PDF">Print</button>
+      <button id="btn-help" title="How to use Project Planner">Help</button>
+    </nav>
+    <input id="file-input" type="file" accept=".json,application/json" hidden>
+  </header>
+
+  <div id="readonly-banner" class="banner" hidden>
+    <span>You are viewing a <strong>read-only shared copy</strong> of this plan.</span>
+    <button id="btn-save-copy" class="primary">Save a copy to my plans</button>
+    <button id="btn-close-shared">Close</button>
+  </div>
+
+  <div class="toolbar">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-view="table">Table</button>
+      <button role="tab" data-view="gantt">Gantt</button>
+      <button role="tab" data-view="split">Both</button>
+    </div>
+    <div class="row-tools edit-only">
+      <button data-cmd="add" title="Add a task after the selected row">+ Task</button>
+      <button data-cmd="insert" title="Insert a task above the selected row">Insert</button>
+      <button data-cmd="delete" title="Delete the selected task">Delete</button>
+      <span class="sep"></span>
+      <button data-cmd="outdent" title="Outdent (move up one outline level)">⇤ Outdent</button>
+      <button data-cmd="indent" title="Indent (make a subtask of the row above)">Indent ⇥</button>
+      <button data-cmd="up" title="Move the selected task up">↑</button>
+      <button data-cmd="down" title="Move the selected task down">↓</button>
+      <span class="sep"></span>
+      <button data-cmd="undo" title="Undo (Ctrl/⌘+Z)">Undo</button>
+      <button data-cmd="redo" title="Redo (Ctrl/⌘+Shift+Z)">Redo</button>
+    </div>
+    <label class="zoom">Zoom
+      <select id="zoom">
+        <option value="day">Days</option>
+        <option value="week">Weeks</option>
+        <option value="month">Months</option>
+      </select>
+    </label>
+  </div>
+
+  <main id="main" class="view-table">
+    <section id="table-pane" class="pane">
+      <table class="tasks">
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </section>
+    <section id="gantt-pane" class="pane gantt-scroll"></section>
+  </main>
+
+  <footer class="statusbar" id="status"></footer>
+
+  <div id="print-area" aria-hidden="true"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <dialog id="dlg-plans">
+    <h2>My plans</h2>
+    <p class="hint">Plans are saved automatically in this browser only. Use <em>Save file</em> to back up a plan or move it to another computer.</p>
+    <ul id="plan-list" class="plan-list"></ul>
+    <div class="dlg-buttons">
+      <button id="btn-new-plan" class="primary">New plan</button>
+      <button id="btn-new-sample">New example plan</button>
+      <button value="close" class="close">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-settings">
+    <form method="dialog" id="settings-form">
+      <h2>Plan settings</h2>
+      <label>Plan name <input name="name" required></label>
+      <label>Project start <input name="start" type="date" required></label>
+      <label>Holidays / non-working days
+        <textarea name="holidays" rows="8" placeholder="2026-11-26 Thanksgiving&#10;2026-11-27"></textarea>
+      </label>
+      <p class="hint">One date per line, as YYYY-MM-DD, optionally followed by a label. Weekends are always non-working.</p>
+      <div class="dlg-buttons">
+        <button value="save" class="primary">Save</button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-share">
+    <h2>Share a read-only link</h2>
+    <p>Anyone with this link can view a snapshot of the plan as it is now and save their own copy. Edits you make later are not included. Share again to send an update.</p>
+    <p class="hint">The plan is packed into the link itself; nothing is uploaded to a server.</p>
+    <textarea id="share-url" rows="4" readonly></textarea>
+    <p id="share-size" class="hint"></p>
+    <div class="dlg-buttons">
+      <button id="btn-copy-share" class="primary">Copy link</button>
+      <button value="close" class="close">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-help">
+    <h2>Using Project Planner</h2>
+    <ul class="help">
+      <li><strong>Durations</strong> are in working days (Mon–Fri, minus holidays from <em>Settings</em>). Type <code>5</code>, <code>5d</code>, or <code>2w</code>. A duration of <code>0</code> makes a milestone ◆.</li>
+      <li><strong>Predecessors</strong>: list the row numbers that must finish first, e.g. <code>2, 5</code>. All links are finish-to-start.</li>
+      <li><strong>Dates</strong>: start and finish are calculated. Typing a <em>Start</em> date pins the task there 📌; click the pin to release it. Typing a <em>Finish</em> date changes the duration.</li>
+      <li><strong>⚠ warnings</strong> mark problems such as a pinned task that starts before its predecessor finishes, or a circular dependency. Hover for details.</li>
+      <li><strong>Summary tasks</strong>: select a task and click <em>Indent</em> to make it a subtask of the row above. Summary rows roll up dates and progress from their subtasks.</li>
+      <li><strong>Critical path</strong> (red) is the chain of tasks with zero float: any slip in them delays the finish. <em>Float</em> is how many working days a task can slip without delaying the project.</li>
+      <li><strong>Saving</strong>: plans save automatically in this browser. Use <em>Save file</em> / <em>Open file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
+      <li><strong>Printing</strong>: <em>Print</em> prints the Gantt chart at the current zoom; choose “Save as PDF” in the print dialog for a PDF. Use the Weeks or Months zoom for long projects.</li>
+    </ul>
+    <div class="dlg-buttons"><button value="close" class="close primary">Close</button></div>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

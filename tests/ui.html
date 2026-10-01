@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Project Planner UI tests</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; }
+    iframe { width: 1300px; height: 700px; border: 1px solid #ccc; }
+    .pass { color: #15803d; } .fail { color: #b91c1c; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Project Planner UI tests</h1>
+  <p>Drives the real app in the frame below. Uses this browser's storage for the test origin; it creates and deletes a test plan.</p>
+  <pre id="out">Running…</pre>
+  <iframe id="app" src="../index.html#"></iframe>
+  <script type="module">
+    const results = [];
+    const check = (ok, msg) => results.push([!!ok, msg]);
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const frame = document.getElementById('app');
+    await new Promise(r => frame.addEventListener('load', r, { once: true }));
+    await sleep(400);
+    const w = frame.contentWindow, d = frame.contentDocument;
+
+    // Start from a fresh example plan so results don't depend on earlier runs
+    d.getElementById('btn-new-sample').click();
+    await sleep(100);
+
+    const row = n => d.querySelector(`#tbody tr:nth-child(${n})`);
+    const cell = (n, f) => row(n).querySelector(`input[data-f="${f}"]`);
+    async function edit(n, f, value, thenFocus = cell(1, 'notes')) {
+      const el = cell(n, f);
+      el.focus();
+      el.value = value;
+      thenFocus.focus(); // focusout commits
+      await sleep(60);
+    }
+    const count = () => d.querySelectorAll('#tbody tr[data-id]').length;
+    const click = async cmd => { d.querySelector(`[data-cmd="${cmd}"]`).click(); await sleep(60); };
+
+    try {
+      const n0 = count();
+      check(n0 === 16, `example plan loads 16 rows (got ${n0})`);
+
+      // Duration edit pushes the successor
+      const s3 = cell(3, 'start').value;
+      await edit(2, 'duration', '2w');
+      check(cell(2, 'duration').value === '10', `"2w" parses to 10 working days (got ${cell(2, 'duration').value})`);
+      check(cell(3, 'start').value > s3, `successor moved later (${s3} → ${cell(3, 'start').value})`);
+
+      // Invalid input is rejected and restored
+      await edit(2, 'duration', 'abc');
+      check(cell(2, 'duration').value === '10', 'invalid duration rejected and restored');
+
+      // Undo / redo
+      await click('undo');
+      check(cell(2, 'duration').value === '5', `undo restores duration (got ${cell(2, 'duration').value})`);
+      await click('redo');
+      check(cell(2, 'duration').value === '10', 'redo reapplies duration');
+      await click('undo');
+
+      // Predecessor edit changes critical path: Firmware (13) after Order parts (9)
+      check(!row(13).classList.contains('critical'), 'Firmware not critical initially');
+      await edit(13, 'preds', '9');
+      check(row(13).classList.contains('critical'), 'Firmware critical after linking to row 9');
+      check(d.querySelectorAll('#gantt-pane .g-link.critical').length > 0, 'Gantt draws critical links');
+      await click('undo');
+
+      // Bad predecessor reference
+      await edit(13, 'preds', '99');
+      check(cell(13, 'preds').value === '7', 'reference to missing row rejected');
+
+      // Pin a start date earlier than the predecessor allows -> warning
+      await edit(3, 'start', cell(2, 'start').value);
+      check(row(3).querySelector('.c-date.pinned') && row(3).classList.contains('has-issue'), 'pinned conflicting start is kept and flagged ⚠');
+      row(3).querySelector('[data-act="unpin"]').click();
+      await sleep(60);
+      check(!row(3).querySelector('.c-date.pinned') && !row(3).classList.contains('has-issue'), 'unpin clears pin and warning');
+
+      // Finish edit changes duration
+      const st = cell(6, 'start').value;
+      const fin = new Date(st + 'T00:00:00Z'); fin.setUTCDate(fin.getUTCDate() + 2); // Mon -> Wed
+      await edit(6, 'finish', fin.toISOString().slice(0, 10));
+      check(cell(6, 'duration').value === '3', `finish date sets duration (got ${cell(6, 'duration').value})`);
+
+      // Add, indent, delete
+      cell(16, 'name').focus(); await sleep(20);
+      await click('add');
+      check(count() === n0 + 1, 'add task appends a row');
+      check(d.activeElement === cell(17, 'name'), 'new row name is focused');
+      await click('indent');
+      check(row(16).classList.contains('summary'), 'indent makes row above a summary');
+      await click('outdent');
+      check(!row(16).classList.contains('summary'), 'outdent reverses it');
+      await click('delete');
+      check(count() === n0, 'delete removes the row');
+
+      // Enter on last name cell adds a row
+      const last = cell(16, 'name');
+      last.focus();
+      last.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await sleep(100);
+      check(count() === n0 + 1, 'Enter on last row adds a task');
+
+      // Persistence: reload the frame, plan is still there with edits
+      const name = d.getElementById('plan-name').textContent;
+      w.location.reload();
+      await new Promise(r => frame.addEventListener('load', r, { once: true }));
+      await sleep(400);
+      const d2 = frame.contentDocument;
+      check(d2.getElementById('plan-name').textContent === name && d2.querySelectorAll('#tbody tr[data-id]').length === n0 + 1,
+        'plan persists across reload');
+    } catch (e) {
+      check(false, `exception: ${e.message}`);
+    }
+
+    const failed = results.filter(r => !r[0]).length;
+    document.getElementById('out').innerHTML = results
+      .map(([ok, msg]) => `<span class="${ok ? 'pass' : 'fail'}">${ok ? 'PASS' : 'FAIL'}  ${msg}</span>`)
+      .join('\n') + `\n\n${results.length - failed}/${results.length} passed`;
+  </script>
+</body>
+</html>

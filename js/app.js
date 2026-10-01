@@ -6,6 +6,7 @@ import { renderGantt, ganttPrintSVG, scrollToDay, esc } from './gantt.js';
 import { renderTable, renderTableHead, parseDuration, parseRowList } from './table.js';
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
+import { attachReorder } from './reorder.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
@@ -244,6 +245,36 @@ function subtreeEnd(tasks, i) {
   return end;
 }
 
+// True when inserting task id's subtree at index k would actually move it.
+function canMove(id, k) {
+  const tasks = state.plan.tasks;
+  const i = tasks.findIndex(t => t.id === id);
+  return i >= 0 && (k < i || k > subtreeEnd(tasks, i));
+}
+
+// Move task i and its subtasks so they land before what is now tasks[k]
+// (k = tasks.length means the end). The moved task keeps its outline level
+// where possible, clamped so it neither adopts the rows below as children nor
+// sits deeper than the rows above allow.
+function moveBlock(plan, i, k) {
+  const tasks = plan.tasks;
+  const end = subtreeEnd(tasks, i);
+  if (k >= i && k <= end) return false;
+  const block = tasks.splice(i, end - i);
+  const at = k > i ? k - block.length : k;
+  const above = tasks[at - 1], below = tasks[at];
+  const min = below ? below.level : 0;
+  const max = above ? above.level + (below && below.level > above.level ? 1 : 0) : 0;
+  const delta = Math.min(max, Math.max(min, block[0].level)) - block[0].level;
+  for (const t of block) t.level += delta;
+  tasks.splice(at, 0, ...block);
+  store.fixLevels(tasks);
+}
+
+function moveTask(id, k) {
+  commit(plan => moveBlock(plan, plan.tasks.findIndex(t => t.id === id), k));
+}
+
 function runCommand(cmd) {
   if (cmd === 'undo') return undo();
   if (cmd === 'redo') return redo();
@@ -302,12 +333,19 @@ function runCommand(cmd) {
     case 'up':
     case 'down': {
       if (i < 0) return;
-      const j = cmd === 'up' ? i - 1 : i + 1;
-      if (j < 0 || j >= tasks.length) return;
-      commit(plan => {
-        [plan.tasks[i], plan.tasks[j]] = [plan.tasks[j], plan.tasks[i]];
-        store.fixLevels(plan.tasks);
-      });
+      // Step over the neighbouring sibling (with its subtasks); at the edge of
+      // a group, step out of it (up) or into the next group (down).
+      let k;
+      if (cmd === 'up') {
+        if (i === 0) return;
+        k = i - 1;
+        while (k > 0 && tasks[k].level > tasks[i].level) k--;
+      } else {
+        const e = subtreeEnd(tasks, i);
+        if (e >= tasks.length) return;
+        k = tasks[e].level === tasks[i].level ? subtreeEnd(tasks, e) : e + 1;
+      }
+      commit(plan => moveBlock(plan, i, k));
       break;
     }
   }
@@ -459,6 +497,22 @@ function wireEvents() {
         setTimeout(() => runCommand('add'), 0);
       } else input.blur();
     }
+  });
+
+  const dragOpts = {
+    canDrop: canMove,
+    onDrop: moveTask,
+    enabled: () => !state.readOnly && state.plan.tasks.length > 1,
+  };
+  attachReorder($('#table-pane'), {
+    ...dragOpts,
+    grip: '.c-num',
+    rows: () => [...document.querySelectorAll('#tbody tr[data-id]')].map(el => ({ id: Number(el.dataset.id), el })),
+  });
+  attachReorder($('#gantt-pane'), {
+    ...dragOpts,
+    grip: '.g-row, .g-task, .g-row-bg',
+    rows: () => [...document.querySelectorAll('#gantt-pane .g-row .g-row-bg')].map(el => ({ id: Number(el.parentNode.dataset.id), el })),
   });
 
   $('#gantt-pane').addEventListener('click', e => {

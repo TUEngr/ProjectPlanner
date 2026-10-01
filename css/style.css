@@ -128,7 +128,7 @@ table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
 .tasks tr.summary input[data-f="name"] { font-weight: 700; }
 .tasks tr.summary input[readonly] { color: var(--fg); }
 .tasks tr.critical input[data-f="name"] { color: var(--crit); }
-.c-num { width: 36px; text-align: right; color: var(--fg-muted); padding-right: 6px !important; font-variant-numeric: tabular-nums; }
+.c-num { width: 44px; text-align: right; color: var(--fg-muted); padding-right: 6px !important; font-variant-numeric: tabular-nums; }
 .c-flag { width: 22px; text-align: center; }
 .flag { color: var(--warn); cursor: help; }
 .flag.ms { color: var(--fg-muted); }
@@ -253,4 +253,16 @@ dialog label input, dialog label textarea, #share-url {
   .print-title p { font-size: 9pt; margin: 0 0 8pt; color: #444; }
   .gantt-print { width: 100%; height: auto; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ---- drag to reorder ---- */
+body:not(.readonly) .tasks td.c-num { cursor: grab; user-select: none; }
+body:not(.readonly) .tasks td.c-num { position: relative; }
+body:not(.readonly) .tasks td.c-num::before { content: '⠿'; position: absolute; left: 4px; top: 50%; transform: translateY(-50%); color: var(--border); }
+body:not(.readonly) .tasks tr:hover td.c-num::before { color: var(--fg-muted); }
+body:not(.readonly) .g-row, body:not(.readonly) .g-task { cursor: grab; }
+body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-select: none !important; }
+.drop-line {
+  position: fixed; z-index: 50; height: 3px; pointer-events: none;
+  background: var(--accent); border-radius: 2px; box-shadow: 0 0 0 1px var(--bg);
 }

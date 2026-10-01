@@ -30,7 +30,7 @@ export function renderTable(tbody, plan, sched, { selectedId = null, readOnly = 
   const html = sched.rows.map((r, i) => {
     const t = plan.tasks[i];
     const lockedRO = readOnly || r.summary ? ' readonly tabindex="-1"' : '';
-    const predText = (t.preds || []).map(id => rowOf.get(id)).filter(Boolean).join(', ');
+    const predText = (t.preds || []).map(id => rowOf.get(id)).filter(Boolean).sort((a, b) => a - b).join(', ');
     const cls = [r.summary && 'summary', !r.summary && r.critical && 'critical', r.milestone && 'milestone',
       r.id === selectedId && 'selected', r.issues.length && 'has-issue'].filter(Boolean).join(' ');
     const flag = r.issues.length

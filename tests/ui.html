@@ -103,6 +103,67 @@
       await sleep(100);
       check(count() === n0 + 1, 'Enter on last row adds a task');
 
+      // ---- Reordering ----
+      d.querySelector('.tabs button[data-view="split"]').click();
+      await sleep(60);
+      const names = () => [...d.querySelectorAll('#tbody input[data-f="name"]')].map(i => i.value);
+      const before = names().join('|');
+      const pe = (type, el, y) => el.dispatchEvent(new w.PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerId: 1, button: 0, isPrimary: true,
+        clientX: el.getBoundingClientRect().left + 5, clientY: y,
+      }));
+      async function drag(fromEl, toY) {
+        const y0 = fromEl.getBoundingClientRect().top + 5;
+        pe('pointerdown', fromEl, y0);
+        pe('pointermove', fromEl, y0 + (toY > y0 ? 8 : -8));
+        pe('pointermove', fromEl, toY);
+        pe('pointerup', fromEl, toY);
+        await sleep(80);
+      }
+      const gRow = n => d.querySelectorAll('#gantt-pane .g-row')[n - 1];
+      const top = el => el.getBoundingClientRect().top;
+
+      // Gantt: drag Firmware (13) to just above Fabricate chassis (11)
+      await drag(gRow(13), top(gRow(11)) + 3);
+      check(cell(11, 'name').value === 'Firmware' && cell(12, 'name').value === 'Fabricate chassis',
+        `Gantt drag moves Firmware to row 11 (row 11 = ${cell(11, 'name').value})`);
+      check(cell(11, 'preds').value === '7' && cell(14, 'preds').value === '11, 12, 13',
+        'dependencies follow the moved task (row numbers renumbered)');
+      check(!row(11).classList.contains('summary') && row(10).classList.contains('summary'), 'moved task stays inside its group');
+      await click('undo');
+      check(names().join('|') === before, 'undo restores order after Gantt drag');
+
+      // Table: drag the Detailed design summary (5) by its row number to the very end
+      const n = count();
+      const lastBottom = row(n).getBoundingClientRect().bottom - 2;
+      await drag(row(5).querySelector('.c-num'), lastBottom);
+      check(cell(n - 4, 'name').value === 'Detailed design' && cell(n, 'name').value === 'Order parts',
+        `table drag moves a summary with its 4 subtasks (row ${n - 4} = ${cell(n - 4, 'name').value})`);
+      check(row(n - 4).classList.contains('summary') && count() === n, 'summary still a summary; no rows lost');
+      await click('undo');
+
+      // Dropping a summary inside its own subtree does nothing
+      await drag(row(5).querySelector('.c-num'), top(row(7)) + 3);
+      check(names().join('|') === before, 'drop into own subtree is ignored');
+
+      // A drag doesn't eat the next click
+      const g3 = gRow(3);
+      g3.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      await sleep(20);
+      check(row(3).classList.contains('selected'), 'click after a drag still selects');
+
+      // ↑ on a top-level group jumps the previous group; ↓ on a subtask passes one sibling
+      cell(10, 'name').focus(); await sleep(20);
+      await click('up');
+      check(cell(5, 'name').value === 'Build & test' && row(5).classList.contains('summary')
+        && cell(11, 'name').value === 'Detailed design', `↑ moves Build & test above Detailed design (row 5 = ${cell(5, 'name').value})`);
+      await click('undo');
+      cell(6, 'name').focus(); await sleep(20);
+      await click('down');
+      check(cell(7, 'name').value === 'Mechanical CAD' && cell(6, 'name').value === 'Electrical schematic', '↓ swaps Mechanical CAD with next sibling');
+      await click('undo');
+      check(names().join('|') === before, 'order restored');
+
       // Persistence: reload the frame, plan is still there with edits
       const name = d.getElementById('plan-name').textContent;
       w.location.reload();

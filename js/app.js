@@ -11,6 +11,8 @@ import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
+const VIEWS = ['table', 'gantt', 'pert', 'split', 'split-pert']; // split = Table/Gantt
+const showsPert = () => state.view === 'pert' || state.view === 'split-pert';
 
 const state = {
   plan: null,
@@ -29,7 +31,7 @@ const state = {
 function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
-    if (['table', 'gantt', 'split', 'pert'].includes(p.view)) state.view = p.view;
+    if (VIEWS.includes(p.view)) state.view = p.view;
     if (['day', 'week', 'month'].includes(p.zoom)) state.zoom = p.zoom;
   } catch { /* defaults */ }
 }
@@ -130,13 +132,13 @@ function render({ scrollGantt = false } = {}) {
   renderGantt(pane, plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden });
   if (scrollGantt) scrollToDay(pane, state.sched, state.zoom, state.sched.startDay);
   else { pane.scrollLeft = scrollLeft; pane.scrollTop = scrollTop; }
-  if (state.view === 'pert') {
+  if (showsPert()) {
     const pp = $('#pert-pane');
     const keep = { left: pp.scrollLeft, top: pp.scrollTop };
     renderPert(pp, plan, state.sched, { selectedId: state.selectedId, hidden: state.hidden });
     pp.scrollLeft = keep.left; pp.scrollTop = keep.top;
   }
-  $('#zoom').disabled = state.view === 'pert'; // the network diagram has no time scale
+  $('#zoom').disabled = showsPert(); // the network diagram has no time scale
 
   if (focusRow && focusField) {
     const el = document.querySelector(`#tbody tr[data-id="${focusRow}"] input[data-f="${focusField}"]`);
@@ -462,7 +464,7 @@ function printGantt() {
   const s = state.sched;
   $('#print-area').innerHTML = `<div class="print-title"><h1>${esc(state.plan.name)}</h1>
     <p>${fmtDate(s.start)} – ${fmtDate(s.finish)} · ${s.workdays} working days · Critical path in red · Printed ${new Date().toLocaleDateString()}</p></div>
-    ${state.view === 'pert' ? pertPrintSVG(state.plan, s, state.hidden) : ganttPrintSVG(state.plan, s, state.zoom, state.hidden)}`;
+    ${showsPert() ? pertPrintSVG(state.plan, s, state.hidden) : ganttPrintSVG(state.plan, s, state.zoom, state.hidden)}`;
   document.documentElement.dataset.theme = 'light'; // print in light colors even in dark mode
   window.print();
 }
@@ -488,7 +490,7 @@ function chartExportCSS() {
 const PNG_MAX_PIXELS = 16e6, PNG_MAX_SIDE = 16000;
 
 async function exportPNG() {
-  const pert = state.view === 'pert';
+  const pert = showsPert();
   const { svg, width, height } = pert
     ? pertStandaloneSVG(state.plan, state.sched, chartExportCSS(), state.hidden)
     : ganttStandaloneSVG(state.plan, state.sched, state.zoom, chartExportCSS(), state.hidden);
@@ -642,7 +644,7 @@ function wireEvents() {
     const el = e.target.closest('.pt-node');
     if (!el || dblToggle(e)) return;
     if (state.readOnly) return;
-    state.view = 'table'; savePrefs(); render();
+    if (state.view === 'pert') { state.view = 'split-pert'; savePrefs(); render(); }
     document.querySelector(`#tbody tr[data-id="${el.dataset.id}"] input[data-f="name"]`)?.focus();
   });
   $('#gantt-pane').addEventListener('dblclick', e => {

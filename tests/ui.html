@@ -276,8 +276,11 @@
       check(/-pert\.png$/.test(pertName || ''), `Export PNG on the PERT tab exports the diagram (${pertName})`);
       fw.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true, detail: 2 }));
       await sleep(60);
-      check(d.getElementById('main').className === 'view-table' && d.activeElement?.value === 'Firmware',
-        'double-clicking a PERT task opens it in the table');
+      check(d.getElementById('main').className === 'view-split-pert' && d.activeElement?.value === 'Firmware'
+        && d.getElementById('pert-pane').offsetHeight > 0 && d.getElementById('gantt-pane').offsetHeight === 0,
+        'double-clicking a PERT task opens Table/PERT with the task focused');
+      check(d.getElementById('zoom').disabled && d.querySelector('.tabs button[aria-selected="true"]').textContent === 'Table/PERT',
+        'Table/PERT tab is selected; zoom disabled');
       d.querySelector('.tabs button[data-view="split"]').click();
       await sleep(60);
 

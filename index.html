@@ -35,8 +35,9 @@
     <div class="tabs" role="tablist">
       <button role="tab" data-view="table">Table</button>
       <button role="tab" data-view="gantt">Gantt</button>
-      <button role="tab" data-view="split">Both</button>
       <button role="tab" data-view="pert" title="Network diagram of task dependencies">PERT</button>
+      <button role="tab" data-view="split">Table/Gantt</button>
+      <button role="tab" data-view="split-pert" title="Task table above the PERT network diagram">Table/PERT</button>
     </div>
     <div class="row-tools edit-only">
       <button data-cmd="add" title="Add a task after the selected row">+ Task</button>
@@ -118,6 +119,7 @@
   <dialog id="dlg-help">
     <h2>Using Project Planner</h2>
     <ul class="help">
+      <li><strong>Views</strong>: <em>Table</em>, <em>Gantt</em>, and <em>PERT</em> show one view each. <em>Table/Gantt</em> and <em>Table/PERT</em> show the table above the chart. The selected task is highlighted in every view.</li>
       <li><strong>Adding tasks</strong>: <em>+ Task</em> adds a row after the selected task (or as the first subtask of a selected summary). <em>Insert</em> adds a row above it. Pressing Enter in the last row's name also adds a task. <em>Delete</em> removes the selected task; its subtasks move up one level and links to it are removed.</li>
       <li><strong>Keyboard</strong>: Enter / Shift+Enter commits a cell and moves down / up the column. Esc cancels the edit. ⌘/Ctrl+Z undoes; ⌘/Ctrl+Shift+Z or Ctrl+Y redoes.</li>
       <li><strong>Durations</strong> are in working days (Mon–Fri, minus holidays from <em>Settings</em>). Type <code>5</code>, <code>5d</code>, or <code>2w</code>. A duration of <code>0</code> makes a milestone ◆.</li>

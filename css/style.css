@@ -106,7 +106,10 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pane { overflow: auto; min-height: 0; }
 main.view-table #table-pane { flex: 1; }
 main.view-table #gantt-pane { display: none; }
-main:not(.view-pert) #pert-pane { display: none; }
+main:not(.view-pert):not(.view-split-pert) #pert-pane { display: none; }
+main.view-split-pert #gantt-pane { display: none; }
+main.view-split-pert #table-pane { flex: 1 1 45%; border-bottom: 3px solid var(--border); }
+main.view-split-pert #pert-pane { flex: 1 1 55%; }
 main.view-pert #table-pane, main.view-pert #gantt-pane { display: none; }
 main.view-pert #pert-pane { flex: 1; }
 main.view-gantt #table-pane { display: none; }
@@ -246,7 +249,7 @@ dialog label input, dialog label textarea, #share-url {
   .topbar, .toolbar, .statusbar, .banner { padding-left: 16px; padding-right: 16px; }
   .actions { margin-left: 0; }
   .zoom { margin-left: 0; }
-  main.view-split #table-pane { flex-basis: 50%; }
+  main.view-split #table-pane, main.view-split-pert #table-pane { flex-basis: 50%; }
 }
 
 /* ---- print: Gantt chart only, scaled to page width ---- */

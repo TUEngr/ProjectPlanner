@@ -223,6 +223,8 @@ dialog label input, dialog label textarea, #share-url {
 .plan-list li.current .link { color: var(--fg); }
 .help { padding-left: 18px; }
 .help li { margin: 6px 0; }
+#dlg-help h3 { margin: 18px 0 6px; font-size: 15px; }
+#dlg-help a { color: var(--accent); }
 
 #toast {
   position: fixed; left: 50%; bottom: 48px; transform: translateX(-50%) translateY(20px);

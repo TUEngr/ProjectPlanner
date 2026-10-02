@@ -28,7 +28,7 @@ export function samplePlan() {
     start: nextMonday(),
     holidays: [],
     tasks: rows.map(([level, name, duration, preds, assignee, pct], i) => ({
-      id: i + 1, name, level, duration, preds, manualStart: null, pct, assignee, notes: '',
+      id: i + 1, name, level, duration, preds: preds.map(id => ({ id, type: 'FS' })), manualStart: null, pct, assignee, notes: '',
     })),
     nextId: rows.length + 1,
   };

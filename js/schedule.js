@@ -2,8 +2,9 @@
 //
 // Plan model:
 //   { name, start: 'YYYY-MM-DD', holidays: [{date, label}], tasks: [Task] }
-//   Task = { id, name, level, duration, preds: [id], manualStart: 'YYYY-MM-DD'|null,
+//   Task = { id, name, level, duration, preds: [Link], manualStart: 'YYYY-MM-DD'|null,
 //            pct, assignee, notes }
+//   Link = { id, type: 'FS'|'SS'|'FF' } (a bare id is accepted as FS)
 //
 // Hierarchy is an outline: a task is a summary if the next row has a deeper
 // level. Summary tasks roll up their children and do not take dependencies.
@@ -11,9 +12,38 @@
 // Time model: a task with start index s and duration d occupies working days
 // s .. s+d-1, so its finish *boundary* is s+d. A milestone (d = 0) is a point
 // in time at boundary s, displayed as the end of working day s-1.
-// Dependencies are finish-to-start: successor.es >= predecessor.ef.
+// Dependencies, for predecessor p and successor s:
+//   FS  finish-to-start   s.es >= p.ef
+//   SS  start-to-start    s.es >= p.es
+//   FF  finish-to-finish  s.ef >= p.ef
 
 import { Calendar, parseISO, toISO } from './calendar.js';
+
+export const LINK_TYPES = ['FS', 'SS', 'FF'];
+
+// A task's links in canonical form; tolerates bare ids (older plans).
+export function linksOf(t) {
+  return (t.preds || []).map(p => (typeof p === 'number' ? { id: p, type: 'FS' } : p))
+    .filter(p => Number.isInteger(p.id) && LINK_TYPES.includes(p.type));
+}
+
+// Earliest start boundary that link `type` from predecessor p allows for a
+// successor of duration d.
+function earliestStart(p, type, d) {
+  return type === 'SS' ? p.es : type === 'FF' ? p.ef - d : p.ef;
+}
+
+// Latest finish boundary for predecessor p that link `type` allows, given the
+// successor's late start/finish.
+function latestFinish(p, type, s) {
+  return type === 'SS' ? s.ls + p.duration : type === 'FF' ? s.lf : s.ls;
+}
+
+// True when the link is what holds the successor where it is (zero slack on
+// the link). Used to draw driving links on the critical path.
+export function linkDrives(p, s, type) {
+  return type === 'SS' ? p.es === s.es : type === 'FF' ? p.ef === s.ef : p.ef === s.es;
+}
 
 export function schedule(plan) {
   const cal = new Calendar(plan.start, plan.holidays);
@@ -47,11 +77,11 @@ export function schedule(plan) {
   // Validate dependencies
   for (const r of leaves) {
     const t = tasks[r.row - 1];
-    for (const pid of t.preds || []) {
+    for (const { id: pid, type } of linksOf(t)) {
       const p = res.get(pid);
       if (!p || pid === r.id) continue;
       if (p.summary) { r.issues.push(`Predecessor ${p.row} is a summary task (ignored)`); continue; }
-      if (!r.preds.includes(pid)) { r.preds.push(pid); p.succs.push(r.id); }
+      if (!r.preds.some(l => l.id === pid)) { r.preds.push({ id: pid, type }); p.succs.push({ id: r.id, type }); }
     }
     if (t.manualStart) {
       const d = parseISO(t.manualStart);
@@ -67,7 +97,7 @@ export function schedule(plan) {
   while (queue.length) {
     const r = queue.shift();
     order.push(r);
-    for (const sid of r.succs) {
+    for (const { id: sid } of r.succs) {
       indeg.set(sid, indeg.get(sid) - 1);
       if (indeg.get(sid) === 0) queue.push(res.get(sid));
     }
@@ -79,10 +109,13 @@ export function schedule(plan) {
   // Forward pass
   for (const r of order) {
     let earliest = 0;
-    for (const pid of r.preds) earliest = Math.max(earliest, res.get(pid).ef);
+    for (const { id, type } of r.preds) earliest = Math.max(earliest, earliestStart(res.get(id), type, r.duration));
     if (r.pinned) {
       r.es = r.pinnedIdx;
-      if (r.preds.length && r.es < earliest) r.issues.push('Starts before a predecessor finishes');
+      for (const { id, type } of r.preds) {
+        const p = res.get(id);
+        if (r.es < earliestStart(p, type, r.duration)) r.issues.push(CONFLICT[type](p.row));
+      }
     } else {
       r.es = earliest;
     }
@@ -100,7 +133,7 @@ export function schedule(plan) {
   for (let k = order.length - 1; k >= 0; k--) {
     const r = order[k];
     let latest = projEndIdx;
-    for (const sid of r.succs) latest = Math.min(latest, res.get(sid).ls);
+    for (const { id, type } of r.succs) latest = Math.min(latest, latestFinish(r, type, res.get(id)));
     r.lf = latest;
     r.ls = r.lf - r.duration;
     r.float = r.ls - r.es;
@@ -146,6 +179,12 @@ export function schedule(plan) {
     workdays: projEndIdx - projStartIdx,
   };
 }
+
+const CONFLICT = {
+  FS: row => `Starts before predecessor ${row} finishes`,
+  SS: row => `Starts before predecessor ${row} starts (SS)`,
+  FF: row => `Finishes before predecessor ${row} finishes (FF)`,
+};
 
 function clampPct(v) {
   const x = Math.round(Number(v) || 0);

@@ -2,6 +2,7 @@
 // committed by app.js when a field loses focus (or on Enter).
 
 import { esc } from './gantt.js';
+import { linksOf } from './schedule.js';
 
 export const COLUMNS = [
   { f: 'num', label: '#', cls: 'c-num' },
@@ -30,7 +31,8 @@ export function renderTable(tbody, plan, sched, { selectedId = null, readOnly = 
   const html = sched.rows.map((r, i) => {
     const t = plan.tasks[i];
     const lockedRO = readOnly || r.summary ? ' readonly tabindex="-1"' : '';
-    const predText = (t.preds || []).map(id => rowOf.get(id)).filter(Boolean).sort((a, b) => a - b).join(', ');
+    const predText = linksOf(t).filter(l => rowOf.has(l.id)).map(l => ({ row: rowOf.get(l.id), type: l.type }))
+      .sort((a, b) => a.row - b.row).map(formatLink).join(', ');
     const cls = [r.summary && 'summary', !r.summary && r.critical && 'critical', r.milestone && 'milestone',
       r.id === selectedId && 'selected', r.issues.length && 'has-issue'].filter(Boolean).join(' ');
     const flag = r.issues.length
@@ -48,7 +50,7 @@ export function renderTable(tbody, plan, sched, { selectedId = null, readOnly = 
       <td class="c-dur">${input('duration', String(r.duration), `${lockedRO} inputmode="numeric" aria-label="Duration in working days"`)}</td>
       <td class="c-date${r.pinned ? ' pinned' : ''}">${input('start', r.start, `${lockedRO} type="date" aria-label="Start date"`)}${unpin}</td>
       <td class="c-date">${input('finish', r.finish, `${lockedRO} type="date" aria-label="Finish date"`)}</td>
-      <td class="c-preds">${input('preds', predText, `${lockedRO} placeholder="${r.summary || readOnly ? '' : 'e.g. 2, 3'}" aria-label="Predecessor row numbers"`)}</td>
+      <td class="c-preds">${input('preds', predText, `${lockedRO} placeholder="${r.summary || readOnly ? '' : 'e.g. 2, 3SS, 4FF'}" title="Row numbers, optionally with a link type: 3 or 3FS (finish-to-start), 3SS (start-to-start), 3FF (finish-to-finish)" aria-label="Predecessors: row numbers with optional SS or FF"`)}</td>
       <td class="c-pct">${input('pct', String(r.pct), `${lockedRO} inputmode="numeric" aria-label="Percent complete"`)}</td>
       <td class="c-who">${input('assignee', t.assignee, `${ro} aria-label="Assignee"`)}</td>
       <td class="c-notes">${input('notes', t.notes, `${ro} aria-label="Notes"`)}</td>
@@ -66,9 +68,19 @@ export function parseDuration(s) {
   return Math.round(n);
 }
 
-// Parse "2, 3 5" into row numbers. Returns array or null if malformed.
-export function parseRowList(s) {
-  const parts = s.split(/[\s,;]+/).filter(Boolean);
-  if (!parts.every(p => /^\d+$/.test(p))) return null;
-  return [...new Set(parts.map(Number))];
+// FS is the default and is shown as a bare row number.
+export function formatLink({ row, type }) {
+  return type === 'FS' ? String(row) : `${row}${type}`;
+}
+
+// Parse "2, 3SS 5ff, 6 FS" into [{ row, type }]. Returns null if malformed.
+// A row listed twice keeps its first link type.
+export function parsePredList(s) {
+  const out = [];
+  const rest = s.replace(/(\d+)\s*(fs|ss|ff)?(?![a-z])/gi, (_, n, t) => {
+    const row = Number(n);
+    if (!out.some(l => l.row === row)) out.push({ row, type: (t || 'FS').toUpperCase() });
+    return ' ';
+  });
+  return /^[\s,;]*$/.test(rest) ? out : null;
 }

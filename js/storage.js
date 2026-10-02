@@ -3,6 +3,7 @@
 // fragment (never sent to any server).
 
 import { parseISO, toISO, todayDay, dayOfWeek } from './calendar.js';
+import { linksOf } from './schedule.js';
 
 const INDEX_KEY = 'projectplanner.index';
 const PLAN_PREFIX = 'projectplanner.plan.';
@@ -98,7 +99,7 @@ export function normalize(obj) {
       name: String(t.name ?? ''),
       level: Math.max(0, Math.min(20, Number(t.level) | 0)),
       duration: Math.max(0, Math.round(Number(t.duration) || 0)),
-      preds: Array.isArray(t.preds) ? t.preds.filter(Number.isInteger) : [],
+      preds: Array.isArray(t.preds) ? linksOf(t) : [], // bare ids from older plans become FS links
       manualStart: t.manualStart && parseISO(t.manualStart) !== null ? t.manualStart : null,
       pct: Math.max(0, Math.min(100, Math.round(Number(t.pct) || 0))),
       assignee: String(t.assignee ?? ''),
@@ -138,7 +139,11 @@ export function planToJSON(plan) {
 }
 
 export function downloadText(filename, text, type = 'application/json') {
-  const url = URL.createObjectURL(new Blob([text], { type }));
+  downloadBlob(filename, new Blob([text], { type }));
+}
+
+export function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;

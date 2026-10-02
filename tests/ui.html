@@ -16,10 +16,13 @@
   <iframe id="app" src="../index.html#"></iframe>
   <script type="module">
     const results = [];
-    const check = (ok, msg) => results.push([!!ok, msg]);
+    const out = document.getElementById('out');
+    const check = (ok, msg) => { results.push([!!ok, msg]); out.textContent = results.map(([o, m]) => (o ? 'PASS  ' : 'FAIL  ') + m).join('\n') + '\n…'; };
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const frame = document.getElementById('app');
-    await new Promise(r => frame.addEventListener('load', r, { once: true }));
+    // The frame may finish loading before this deferred module runs
+    if (frame.contentDocument?.readyState !== 'complete' || frame.contentWindow.location.href === 'about:blank')
+      await new Promise(r => frame.addEventListener('load', r, { once: true }));
     await sleep(400);
     const w = frame.contentWindow, d = frame.contentDocument;
 
@@ -103,6 +106,19 @@
       await sleep(100);
       check(count() === n0 + 1, 'Enter on last row adds a task');
 
+      // ---- SS / FF links ----
+      await edit(7, 'preds', '6ss');
+      check(cell(7, 'preds').value === '6SS' && cell(7, 'start').value === cell(6, 'start').value,
+        `SS: Electrical schematic starts with Mechanical CAD (${cell(7, 'start').value})`);
+      await edit(8, 'preds', '6 FF');
+      check(cell(8, 'preds').value === '6FF' && cell(8, 'finish').value === cell(6, 'finish').value,
+        `FF: PCB layout finishes with Mechanical CAD (${cell(8, 'finish').value})`);
+      await edit(8, 'preds', '6SX');
+      check(cell(8, 'preds').value === '6FF', 'malformed link type rejected');
+      check(d.querySelectorAll('#gantt-pane .g-link').length === 15, 'Gantt still draws one arrow per link');
+      await click('undo'); await click('undo');
+      check(cell(7, 'preds').value === '4' && cell(8, 'preds').value === '7', 'undo restores FS links');
+
       // ---- Reordering ----
       d.querySelector('.tabs button[data-view="split"]').click();
       await sleep(60);
@@ -163,6 +179,37 @@
       check(cell(7, 'name').value === 'Mechanical CAD' && cell(6, 'name').value === 'Electrical schematic', '↓ swaps Mechanical CAD with next sibling');
       await click('undo');
       check(names().join('|') === before, 'order restored');
+
+      // ---- PNG export: capture the download instead of saving it ----
+      const captured = new Promise(resolve => {
+        const origURL = w.URL.createObjectURL, origClick = w.HTMLAnchorElement.prototype.click;
+        let lastBlob = null;
+        w.URL.createObjectURL = b => { lastBlob = b; return origURL.call(w.URL, b); };
+        w.HTMLAnchorElement.prototype.click = function () {
+          if (!this.download.endsWith('.png')) return origClick.call(this);
+          w.URL.createObjectURL = origURL; w.HTMLAnchorElement.prototype.click = origClick;
+          resolve({ name: this.download, blob: lastBlob });
+        };
+      });
+      d.getElementById('btn-png').click();
+      const dl = await Promise.race([captured, sleep(5000).then(() => null)]);
+      check(dl && /-gantt\.png$/.test(dl.name), `PNG download offered (${dl?.name})`);
+      if (dl) {
+        const blob = dl.blob;
+        const bmp = new Image();
+        bmp.src = URL.createObjectURL(blob);
+        await bmp.decode();
+        const svgW = d.querySelector('#gantt-pane .g-body svg').width.baseVal.value + 280;
+        check(blob.type === 'image/png' && bmp.width === svgW * 2, `PNG is 2× the chart width (${bmp.width} px for ${svgW} px chart)`);
+        // Sample pixels: white background, and red somewhere (critical path)
+        const c = Object.assign(document.createElement('canvas'), { width: bmp.width, height: bmp.height }), cx = c.getContext('2d');
+        cx.drawImage(bmp, 0, 0);
+        const px = cx.getImageData(0, 0, bmp.width, bmp.height).data;
+        let red = 0;
+        for (let k = 0; k < px.length; k += 16) if (px[k] > 200 && px[k + 1] < 80 && px[k + 2] < 80) red++;
+        check(red > 100, `critical path drawn in red (${red} sampled red pixels)`);
+        document.body.insertAdjacentHTML('beforeend', `<h2>Exported PNG</h2><img id="png-out" style="max-width:100%;border:1px solid #ccc" src="${bmp.src}">`);
+      }
 
       // Persistence: reload the frame, plan is still there with edits
       const name = d.getElementById('plan-name').textContent;

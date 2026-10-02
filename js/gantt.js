@@ -4,6 +4,7 @@
 // single scalable SVG.
 
 import { toISO, todayDay, dayOfWeek } from './calendar.js';
+import { linkDrives } from './schedule.js';
 
 export const ROW = 26;
 const HEAD = 44;
@@ -133,17 +134,28 @@ function body(sched, plan, L, selectedId) {
   for (const r of rows) {
     if (r.summary) continue;
     const g = geom(r);
-    for (const pid of r.preds) {
+    for (const { id: pid, type } of r.preds) {
       const p = sched.byId.get(pid);
       const pg = geom(p);
-      const crit = p.critical && r.critical && p.ef === r.es;
-      const xe = pg.x2, ye = pg.mid, xs = g.x1, ys = g.mid;
+      const crit = p.critical && r.critical && linkDrives(p, r, type);
+      const ye = pg.mid, ys = g.mid;
       let d;
-      if (xs - xe >= 14) {
-        d = `M${xe},${ye} H${xs - 8} V${ys} H${xs - 1}`;
+      if (type === 'SS') {
+        // Start to start: out the left of p, in from the left of r
+        const xl = Math.min(pg.x1, g.x1) - 8;
+        d = `M${pg.x1},${ye} H${xl} V${ys} H${g.x1 - 1}`;
+      } else if (type === 'FF') {
+        // Finish to finish: out the right of p, in from the right of r
+        const xr = Math.max(pg.x2, g.x2) + 8;
+        d = `M${pg.x2},${ye} H${xr} V${ys} H${g.x2 + 1}`;
       } else {
-        const yb = ys > ye ? g.top : g.top + ROW;
-        d = `M${xe},${ye} h7 V${yb} H${xs - 8} V${ys} H${xs - 1}`;
+        const xe = pg.x2, xs = g.x1;
+        if (xs - xe >= 14) {
+          d = `M${xe},${ye} H${xs - 8} V${ys} H${xs - 1}`;
+        } else {
+          const yb = ys > ye ? g.top : g.top + ROW;
+          d = `M${xe},${ye} h7 V${yb} H${xs - 8} V${ys} H${xs - 1}`;
+        }
       }
       arrows.push(`<path class="g-link${crit ? ' critical' : ''}" d="${d}" marker-end="url(#${crit ? 'arrow-crit' : 'arrow'})"/>`);
     }
@@ -151,6 +163,10 @@ function body(sched, plan, L, selectedId) {
   // Critical links drawn last so they are not hidden under grey ones
   arrows.sort((a, b) => a.includes(' critical') - b.includes(' critical'));
   out.push(...arrows);
+
+  // FF arrows turn just right of the bar end, so labels there move further out
+  const ffEnds = new Set();
+  for (const r of rows) for (const l of r.preds) if (l.type === 'FF') { ffEnds.add(r.id); ffEnds.add(l.id); }
 
   // Bars
   rows.forEach((r, i) => {
@@ -174,7 +190,7 @@ function body(sched, plan, L, selectedId) {
       shape = `<rect class="g-bar${r.critical ? ' critical' : ''}${conflict}" x="${g.x1}" y="${y}" width="${w}" height="${h}" rx="2"/>`
         + (pw > 0 ? `<rect class="g-progress${r.critical ? ' critical' : ''}" x="${g.x1}" y="${y + h / 2 - 2}" width="${pw}" height="4"/>` : '');
     }
-    const note = t.assignee ? `<text class="g-bar-text" x="${g.x2 + 6}" y="${g.mid + 4}">${esc(t.assignee)}</text>` : '';
+    const note = t.assignee ? `<text class="g-bar-text" x="${g.x2 + (ffEnds.has(r.id) ? 14 : 6)}" y="${g.mid + 4}">${esc(t.assignee)}</text>` : '';
     out.push(`<g class="g-task" data-id="${r.id}">${shape}${note}${tip}</g>`);
   });
   return out.join('');
@@ -205,14 +221,30 @@ export function scrollToDay(container, sched, zoom, day) {
   container.scrollLeft = Math.max(0, L.x(day) - 2 * L.px);
 }
 
-// One self-contained SVG for printing / PDF.
-export function ganttPrintSVG(plan, sched, zoom) {
+function wholeChart(plan, sched, zoom) {
   const L = layout(sched, zoom);
   const W = LABEL_W + L.width, H = HEAD + L.height;
-  return `<svg class="gantt-print" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMin meet">${DEFS}
+  const inner = `${DEFS}
     <g transform="translate(${LABEL_W},${HEAD})">${body(sched, plan, L, null)}</g>
     <g transform="translate(0,${HEAD})">${labels(sched, plan, null)}</g>
     <g transform="translate(${LABEL_W},0)">${header(L, zoom)}</g>
-    <rect class="g-head-bg" width="${LABEL_W}" height="${HEAD}"/><text class="g-head-text" x="10" y="${HEAD - 10}">Task</text>
-  </svg>`;
+    <rect class="g-head-bg" width="${LABEL_W}" height="${HEAD}"/><text class="g-head-text" x="10" y="${HEAD - 10}">Task</text>`;
+  return { W, H, inner };
+}
+
+// One SVG for printing / PDF, styled by the page's stylesheet.
+export function ganttPrintSVG(plan, sched, zoom) {
+  const { W, H, inner } = wholeChart(plan, sched, zoom);
+  return `<svg class="gantt-print" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMin meet">${inner}</svg>`;
+}
+
+// A standalone SVG document (for rasterizing to PNG). `css` must carry every
+// style the chart needs, since an SVG loaded as an image can't see the page.
+export function ganttStandaloneSVG(plan, sched, zoom, css) {
+  const { W, H, inner } = wholeChart(plan, sched, zoom);
+  return {
+    width: W, height: H,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+      + `<style>${css}</style><rect width="${W}" height="${H}" fill="#fff"/>${inner}</svg>`,
+  };
 }

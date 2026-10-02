@@ -1,9 +1,9 @@
 // Application controller: state, editing commands, persistence, and views.
 
 import { parseISO, toISO } from './calendar.js';
-import { schedule, durationBetween } from './schedule.js';
-import { renderGantt, ganttPrintSVG, scrollToDay, esc } from './gantt.js';
-import { renderTable, renderTableHead, parseDuration, parseRowList } from './table.js';
+import { schedule, durationBetween, linksOf } from './schedule.js';
+import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, esc } from './gantt.js';
+import { renderTable, renderTableHead, parseDuration, parsePredList } from './table.js';
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
@@ -213,16 +213,16 @@ function applyEdit(id, field, raw) {
         break;
       }
       case 'preds': {
-        const nums = parseRowList(value);
-        if (nums === null) return reject('Predecessors must be row numbers separated by commas, e.g. 2, 5.');
-        const ids = [];
-        for (const n of nums) {
+        const links = parsePredList(value);
+        if (links === null) return reject('Predecessors are row numbers with an optional link type, e.g. 2, 5SS, 7FF.');
+        const preds = [];
+        for (const { row: n, type } of links) {
           const p = plan.tasks[n - 1];
           if (!p) return reject(`There is no row ${n}.`);
           if (p.id === id) return reject('A task cannot be its own predecessor.');
-          ids.push(p.id);
+          preds.push({ id: p.id, type });
         }
-        t.preds = ids;
+        t.preds = preds;
         break;
       }
       default: return false;
@@ -311,7 +311,7 @@ function runCommand(cmd) {
       commit(plan => {
         const [gone] = plan.tasks.splice(i, 1);
         for (let k = i; k < plan.tasks.length && plan.tasks[k].level > gone.level; k++) plan.tasks[k].level--;
-        for (const t of plan.tasks) t.preds = t.preds.filter(p => p !== gone.id);
+        for (const t of plan.tasks) t.preds = linksOf(t).filter(p => p.id !== gone.id);
         state.selectedId = plan.tasks[Math.min(i, plan.tasks.length - 1)]?.id ?? null;
       });
       toast(`Deleted “${name}”. Undo is available.`);
@@ -417,6 +417,53 @@ function printGantt() {
     ${ganttPrintSVG(state.plan, s, state.zoom)}`;
   document.documentElement.dataset.theme = 'light'; // print in light colors even in dark mode
   window.print();
+}
+
+// The Gantt rules from style.css with light-theme colors substituted, so an
+// exported image looks like the screen in light mode whatever the viewer uses.
+function ganttExportCSS() {
+  const sheet = [...document.styleSheets].find(s => s.href?.endsWith('/style.css'));
+  const rules = [...sheet.cssRules].filter(r => r instanceof CSSStyleRule);
+  const vars = {};
+  const root = rules.find(r => r.selectorText === ':root').style;
+  for (let k = 0; k < root.length; k++) {
+    if (root[k].startsWith('--')) vars[root[k]] = root.getPropertyValue(root[k]).trim();
+  }
+  return rules
+    .filter(r => r.selectorText.split(',').every(s => s.trim().startsWith('.g-')))
+    .map(r => r.cssText.replace(/var\((--[\w-]+)\)/g, (m, v) => vars[v] ?? m))
+    .join('\n');
+}
+
+// Browsers cap canvas size (Safari at ~16.7 Mpx), so very long charts are
+// exported at a lower scale rather than failing.
+const PNG_MAX_PIXELS = 16e6, PNG_MAX_SIDE = 16000;
+
+async function exportPNG() {
+  const { svg, width, height } = ganttStandaloneSVG(state.plan, state.sched, state.zoom, ganttExportCSS());
+  const scale = Math.min(2, PNG_MAX_SIDE / width, PNG_MAX_SIDE / height, Math.sqrt(PNG_MAX_PIXELS / (width * height)));
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0, width, height);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    if (!blob) throw new Error('the browser could not encode the image');
+    store.downloadBlob(`${store.safeFilename(state.plan.name)}-gantt.png`, blob);
+    toast(scale < 1
+      ? `Chart is very large, so it was exported at reduced resolution (${canvas.width}×${canvas.height}). Try a coarser zoom.`
+      : `Exported ${canvas.width}×${canvas.height} PNG at the current zoom.`);
+  } catch (e) {
+    toast(`PNG export failed: ${e.message}`, 'error');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 async function importFile(file) {
@@ -552,7 +599,12 @@ function wireEvents() {
   });
   $('#btn-share').addEventListener('click', showShare);
   $('#btn-print').addEventListener('click', printGantt);
-  $('#btn-help').addEventListener('click', () => $('#dlg-help').showModal());
+  $('#btn-png').addEventListener('click', exportPNG);
+  $('#btn-help').addEventListener('click', () => {
+    const dlg = $('#dlg-help');
+    dlg.showModal();
+    dlg.scrollTop = 0; // showModal focuses Close at the bottom; start at the top
+  });
 
   $('#settings-form').addEventListener('submit', e => {
     if (e.submitter?.value === 'save') saveSettings();

@@ -13,6 +13,7 @@
   --bar-dark: #1e40af;
   --crit: #dc2626;
   --crit-dark: #8f1515;
+  --crit-soft: #fde4e4;
   --summary: #1c2230;
   --link: #8a94a6;
   --nonwork: #eceef2;
@@ -39,6 +40,7 @@
     --bar-dark: #c7d7ff;
     --crit: #f05252;
     --crit-dark: #ffd0d0;
+    --crit-soft: #4a1d1f;
     --summary: #e6e9ef;
     --link: #7c869a;
     --nonwork: #1f2430;
@@ -104,6 +106,9 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pane { overflow: auto; min-height: 0; }
 main.view-table #table-pane { flex: 1; }
 main.view-table #gantt-pane { display: none; }
+main:not(.view-pert) #pert-pane { display: none; }
+main.view-pert #table-pane, main.view-pert #gantt-pane { display: none; }
+main.view-pert #pert-pane { flex: 1; }
 main.view-gantt #table-pane { display: none; }
 main.view-gantt #gantt-pane { flex: 1; }
 main.view-split #table-pane { flex: 1 1 45%; border-bottom: 3px solid var(--border); }
@@ -268,3 +273,41 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
   position: fixed; z-index: 50; height: 3px; pointer-events: none;
   background: var(--accent); border-radius: 2px; box-shadow: 0 0 0 1px var(--bg);
 }
+
+/* ---- collapse / expand summary rows ---- */
+.tasks td.c-name { position: relative; }
+.twisty {
+  position: absolute; top: 4px; width: 18px; height: 20px; padding: 0; z-index: 1;
+  border: none; background: none; color: var(--fg-muted); font-size: 15px; line-height: 20px; cursor: pointer;
+}
+.twisty:hover { color: var(--fg); }
+.g-twisty { fill: var(--fg-muted); font-size: 14px; font-family: var(--font); cursor: pointer; }
+.g-twisty:hover { fill: var(--fg); }
+
+/* ---- PERT / network diagram ---- */
+#pert-pane { background: var(--bg-alt); }
+.pert { display: block; }
+.pt-node { cursor: pointer; }
+.pt-box { fill: var(--bg); stroke: var(--border); stroke-width: 1.2; }
+.pt-head { fill: var(--bg-head); }
+.pt-rule { stroke: var(--border); stroke-width: 1; }
+.pt-node.critical .pt-box { stroke: var(--crit); stroke-width: 2; }
+.pt-node.critical .pt-head { fill: var(--crit-soft); }
+.pt-node.critical .pt-rule { stroke: var(--crit); }
+.pt-node.summary .pt-box { stroke-dasharray: 5 3; stroke-width: 1.5; stroke: var(--summary); }
+.pt-node.conflict .pt-box { stroke: var(--warn); stroke-dasharray: 3 2; }
+.pt-node.selected .pt-box { fill: var(--select); }
+.pt-num { fill: var(--fg-muted); font-size: 11px; font-family: var(--font); }
+.pt-title { fill: var(--fg); font-size: 12.5px; font-weight: 700; font-family: var(--font); }
+.pt-node.critical .pt-title { fill: var(--crit); }
+.pt-text { fill: var(--fg); font-size: 11.5px; font-family: var(--font); }
+.pt-text.muted { fill: var(--fg-muted); }
+.pt-text.crit { fill: var(--crit); font-weight: 600; }
+.pt-warn { fill: var(--warn); font-size: 13px; font-family: var(--font); }
+.pt-link { fill: none; stroke: var(--link); stroke-width: 1.4; }
+.pt-link.critical { stroke: var(--crit); stroke-width: 2; }
+.pt-arrowhead { fill: var(--link); }
+.pt-arrowhead.critical { fill: var(--crit); }
+.pt-tag-bg { fill: var(--bg); stroke: var(--border); }
+.pt-tag { fill: var(--fg-muted); font-size: 10px; font-weight: 700; font-family: var(--font); }
+.pt-tag.critical { fill: var(--crit); }

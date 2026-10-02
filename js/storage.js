@@ -101,6 +101,7 @@ export function normalize(obj) {
       duration: Math.max(0, Math.round(Number(t.duration) || 0)),
       preds: Array.isArray(t.preds) ? linksOf(t) : [], // bare ids from older plans become FS links
       manualStart: t.manualStart && parseISO(t.manualStart) !== null ? t.manualStart : null,
+      collapsed: t.collapsed === true,
       pct: Math.max(0, Math.min(100, Math.round(Number(t.pct) || 0))),
       assignee: String(t.assignee ?? ''),
       notes: String(t.notes ?? ''),

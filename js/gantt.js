@@ -19,7 +19,12 @@ export function esc(s) {
 const ymd = n => { const [y, m, d] = toISO(n).split('-').map(Number); return { y, m, d }; };
 const dayOf = (y, m, d) => Date.UTC(y, m - 1, d) / 86400000;
 
-function layout(sched, zoom) {
+// Rows to draw, skipping those inside collapsed summaries.
+function visible(plan, sched, hidden) {
+  return sched.rows.map((r, i) => ({ r, t: plan.tasks[i] })).filter(({ r }) => !hidden.has(r.id));
+}
+
+function layout(sched, zoom, nRows) {
   const px = ZOOM_PX[zoom] || ZOOM_PX.day;
   let from = sched.startDay - 3;
   let to = sched.finishDay + 10;
@@ -29,7 +34,7 @@ function layout(sched, zoom) {
     const b = ymd(to); to = dayOf(b.y, b.m + 1, 1);
   }
   const width = Math.max(600, (to - from) * px);
-  const height = Math.max(sched.rows.length, 1) * ROW;
+  const height = Math.max(nRows, 1) * ROW;
   return { px, from, to, width, height, x: n => (n - from) * px };
 }
 
@@ -73,18 +78,22 @@ function header(L, zoom) {
   return out.join('');
 }
 
-function labels(sched, plan, selectedId) {
-  const out = [`<rect class="g-label-bg" x="0" y="0" width="${LABEL_W}" height="${Math.max(sched.rows.length, 1) * ROW}"/>`];
-  sched.rows.forEach((r, i) => {
-    const t = plan.tasks[i];
+function labels(vis, selectedId) {
+  const out = [`<rect class="g-label-bg" x="0" y="0" width="${LABEL_W}" height="${Math.max(vis.length, 1) * ROW}"/>`];
+  vis.forEach(({ r, t }, i) => {
     const y = i * ROW;
+    const x = 36 + r.level * 14;
+    const twisty = r.summary
+      ? `<text class="g-twisty" data-act="toggle" x="${x + 4}" y="${y + 17}" text-anchor="middle">${t.collapsed ? '▸' : '▾'}<title>${t.collapsed ? 'Expand' : 'Collapse'} (or double-click the row)</title></text>`
+      : '';
     const cls = ['g-label', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '', r.id === selectedId ? 'selected' : ''].join(' ');
     const warn = r.issues.length ? `<tspan class="g-warn">⚠<title>${esc(r.issues.join('\n'))}</title></tspan> ` : '';
     const pin = r.pinned ? ' 📌' : '';
     out.push(`<g class="g-row" data-id="${r.id}">`
       + `<rect class="g-row-bg${r.id === selectedId ? ' selected' : ''}" x="0" y="${y}" width="${LABEL_W}" height="${ROW}"/>`
       + `<text class="g-rownum" x="26" y="${y + 17}" text-anchor="end">${r.row}</text>`
-      + `<text class="${cls}" x="${36 + r.level * 14}" y="${y + 17}">${warn}${esc(truncate(t.name || '(unnamed)', 34 - r.level * 2))}${pin}</text>`
+      + twisty
+      + `<text class="${cls}" x="${x + 12}" y="${y + 17}">${warn}${esc(truncate(t.name || '(unnamed)', 32 - r.level * 2))}${pin}</text>`
       + `</g>`);
   });
   return out.join('');
@@ -94,9 +103,9 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, Math.max(n - 1, 4)) + '…' : s;
 }
 
-function body(sched, plan, L, selectedId) {
+function body(sched, vis, hidden, L, selectedId) {
   const out = [];
-  const rows = sched.rows;
+  const rows = vis.map(v => v.r);
   // Row stripes and selection
   rows.forEach((r, i) => {
     out.push(`<rect class="g-row-bg${r.id === selectedId ? ' selected' : ''}${i % 2 ? ' odd' : ''}" data-id="${r.id}" x="0" y="${i * ROW}" width="${L.width}" height="${ROW}"/>`);
@@ -129,15 +138,22 @@ function body(sched, plan, L, selectedId) {
     return { top, mid, x1: L.x(r.startDay), x2: L.x(r.finishDay + 1) };
   };
 
+  // A task hidden in a collapsed group is represented by that group's bar
+  const shown = id => { while (hidden.has(id)) id = sched.byId.get(id).parent; return sched.byId.get(id); };
+
   // Dependency arrows (drawn first so bars sit on top)
-  const arrows = [];
-  for (const r of rows) {
-    if (r.summary) continue;
+  const arrows = new Map(); // key -> { d, crit }; merged links are critical if any part is
+  for (const s of sched.rows) {
+    if (s.summary) continue;
+    const r = shown(s.id);
     const g = geom(r);
-    for (const { id: pid, type } of r.preds) {
-      const p = sched.byId.get(pid);
+    for (const { id: pid, type } of s.preds) {
+      const p0 = sched.byId.get(pid), p = shown(pid);
+      if (p === r) continue; // both ends inside the same collapsed group
+      const key = `${p.id}>${r.id}:${type}`;
+      const crit = p0.critical && s.critical && linkDrives(p0, s, type);
+      if (arrows.has(key)) { arrows.get(key).crit ||= crit; continue; }
       const pg = geom(p);
-      const crit = p.critical && r.critical && linkDrives(p, r, type);
       const ye = pg.mid, ys = g.mid;
       let d;
       if (type === 'SS') {
@@ -157,20 +173,20 @@ function body(sched, plan, L, selectedId) {
           d = `M${xe},${ye} h7 V${yb} H${xs - 8} V${ys} H${xs - 1}`;
         }
       }
-      arrows.push(`<path class="g-link${crit ? ' critical' : ''}" d="${d}" marker-end="url(#${crit ? 'arrow-crit' : 'arrow'})"/>`);
+      arrows.set(key, { d, crit });
     }
   }
   // Critical links drawn last so they are not hidden under grey ones
-  arrows.sort((a, b) => a.includes(' critical') - b.includes(' critical'));
-  out.push(...arrows);
+  for (const { d, crit } of [...arrows.values()].sort((a, b) => a.crit - b.crit)) {
+    out.push(`<path class="g-link${crit ? ' critical' : ''}" d="${d}" marker-end="url(#${crit ? 'arrow-crit' : 'arrow'})"/>`);
+  }
 
   // FF arrows turn just right of the bar end, so labels there move further out
   const ffEnds = new Set();
-  for (const r of rows) for (const l of r.preds) if (l.type === 'FF') { ffEnds.add(r.id); ffEnds.add(l.id); }
+  for (const r of sched.rows) for (const l of r.preds) if (l.type === 'FF') { ffEnds.add(shown(r.id).id); ffEnds.add(shown(l.id).id); }
 
   // Bars
-  rows.forEach((r, i) => {
-    const t = plan.tasks[i];
+  vis.forEach(({ r, t }) => {
     const g = geom(r);
     const tip = `<title>${esc(`${r.row}. ${t.name}\n${r.start}${r.milestone ? '' : ' → ' + r.finish}`
       + `${r.summary ? '' : `\n${r.duration} working day${r.duration === 1 ? '' : 's'}, float ${r.float ?? '?'}`}`
@@ -202,46 +218,48 @@ const DEFS = `<defs>
 </defs>`;
 
 // Render into a container element. Returns nothing; call again on change.
-export function renderGantt(container, plan, sched, { zoom = 'day', selectedId = null } = {}) {
-  const L = layout(sched, zoom);
-  const H = Math.max(sched.rows.length, 1) * ROW;
+export function renderGantt(container, plan, sched, { zoom = 'day', selectedId = null, hidden = new Set() } = {}) {
+  const vis = visible(plan, sched, hidden);
+  const L = layout(sched, zoom, vis.length);
+  const H = L.height;
   container.innerHTML = `
     <div class="gantt-grid" style="grid-template-columns:${LABEL_W}px ${L.width}px">
       <div class="g-corner"><svg width="${LABEL_W}" height="${HEAD}"><rect class="g-head-bg" width="${LABEL_W}" height="${HEAD}"/>
         <text class="g-head-text" x="10" y="${HEAD - 10}">Task</text></svg></div>
       <div class="g-head"><svg width="${L.width}" height="${HEAD}">${header(L, zoom)}</svg></div>
-      <div class="g-labels"><svg width="${LABEL_W}" height="${H}">${labels(sched, plan, selectedId)}</svg></div>
-      <div class="g-body"><svg width="${L.width}" height="${H}">${DEFS}${body(sched, plan, L, selectedId)}</svg></div>
+      <div class="g-labels"><svg width="${LABEL_W}" height="${H}">${labels(vis, selectedId)}</svg></div>
+      <div class="g-body"><svg width="${L.width}" height="${H}">${DEFS}${body(sched, vis, hidden, L, selectedId)}</svg></div>
     </div>`;
 }
 
 // Scroll so a given day is near the left edge of the chart.
 export function scrollToDay(container, sched, zoom, day) {
-  const L = layout(sched, zoom);
+  const L = layout(sched, zoom, 0);
   container.scrollLeft = Math.max(0, L.x(day) - 2 * L.px);
 }
 
-function wholeChart(plan, sched, zoom) {
-  const L = layout(sched, zoom);
+function wholeChart(plan, sched, zoom, hidden) {
+  const vis = visible(plan, sched, hidden);
+  const L = layout(sched, zoom, vis.length);
   const W = LABEL_W + L.width, H = HEAD + L.height;
   const inner = `${DEFS}
-    <g transform="translate(${LABEL_W},${HEAD})">${body(sched, plan, L, null)}</g>
-    <g transform="translate(0,${HEAD})">${labels(sched, plan, null)}</g>
+    <g transform="translate(${LABEL_W},${HEAD})">${body(sched, vis, hidden, L, null)}</g>
+    <g transform="translate(0,${HEAD})">${labels(vis, null)}</g>
     <g transform="translate(${LABEL_W},0)">${header(L, zoom)}</g>
     <rect class="g-head-bg" width="${LABEL_W}" height="${HEAD}"/><text class="g-head-text" x="10" y="${HEAD - 10}">Task</text>`;
   return { W, H, inner };
 }
 
 // One SVG for printing / PDF, styled by the page's stylesheet.
-export function ganttPrintSVG(plan, sched, zoom) {
-  const { W, H, inner } = wholeChart(plan, sched, zoom);
+export function ganttPrintSVG(plan, sched, zoom, hidden = new Set()) {
+  const { W, H, inner } = wholeChart(plan, sched, zoom, hidden);
   return `<svg class="gantt-print" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMin meet">${inner}</svg>`;
 }
 
 // A standalone SVG document (for rasterizing to PNG). `css` must carry every
 // style the chart needs, since an SVG loaded as an image can't see the page.
-export function ganttStandaloneSVG(plan, sched, zoom, css) {
-  const { W, H, inner } = wholeChart(plan, sched, zoom);
+export function ganttStandaloneSVG(plan, sched, zoom, css, hidden = new Set()) {
+  const { W, H, inner } = wholeChart(plan, sched, zoom, hidden);
   return {
     width: W, height: H,
     svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`

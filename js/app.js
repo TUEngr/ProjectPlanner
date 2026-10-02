@@ -1,12 +1,13 @@
 // Application controller: state, editing commands, persistence, and views.
 
 import { parseISO, toISO } from './calendar.js';
-import { schedule, durationBetween, linksOf } from './schedule.js';
+import { schedule, durationBetween, linksOf, hiddenIds } from './schedule.js';
 import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, esc } from './gantt.js';
 import { renderTable, renderTableHead, parseDuration, parsePredList } from './table.js';
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
+import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
@@ -16,6 +17,7 @@ const state = {
   sched: null,
   selectedId: null,
   readOnly: false,
+  hidden: new Set(), // ids of rows inside collapsed summaries (recomputed by render)
   view: 'split',
   zoom: 'day',
   undo: [],
@@ -27,7 +29,7 @@ const state = {
 function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
-    if (['table', 'gantt', 'split'].includes(p.view)) state.view = p.view;
+    if (['table', 'gantt', 'split', 'pert'].includes(p.view)) state.view = p.view;
     if (['day', 'week', 'month'].includes(p.zoom)) state.zoom = p.zoom;
   } catch { /* defaults */ }
 }
@@ -104,6 +106,12 @@ function render({ scrollGantt = false } = {}) {
     return;
   }
   if (!plan.tasks.some(t => t.id === state.selectedId)) state.selectedId = plan.tasks[0]?.id ?? null;
+  // The selected task is always visible: expand any collapsed group hiding it
+  // (e.g. after adding or moving a task into one, or an undo).
+  for (let p = state.sched.byId.get(state.selectedId)?.parent; p != null; p = state.sched.byId.get(p).parent) {
+    plan.tasks.find(t => t.id === p).collapsed = false;
+  }
+  state.hidden = hiddenIds(plan, state.sched);
 
   // Remember focus so the table can be rebuilt under the cursor
   const active = document.activeElement;
@@ -116,12 +124,19 @@ function render({ scrollGantt = false } = {}) {
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
   $('#zoom').value = state.zoom;
 
-  renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly });
+  renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly, hidden: state.hidden });
   const pane = $('#gantt-pane');
   const { scrollLeft, scrollTop } = pane;
-  renderGantt(pane, plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId });
+  renderGantt(pane, plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden });
   if (scrollGantt) scrollToDay(pane, state.sched, state.zoom, state.sched.startDay);
   else { pane.scrollLeft = scrollLeft; pane.scrollTop = scrollTop; }
+  if (state.view === 'pert') {
+    const pp = $('#pert-pane');
+    const keep = { left: pp.scrollLeft, top: pp.scrollTop };
+    renderPert(pp, plan, state.sched, { selectedId: state.selectedId, hidden: state.hidden });
+    pp.scrollLeft = keep.left; pp.scrollTop = keep.top;
+  }
+  $('#zoom').disabled = state.view === 'pert'; // the network diagram has no time scale
 
   if (focusRow && focusField) {
     const el = document.querySelector(`#tbody tr[data-id="${focusRow}"] input[data-f="${focusField}"]`);
@@ -170,6 +185,8 @@ function select(id) {
   document.querySelectorAll('#gantt-pane .selected').forEach(el => el.classList.remove('selected'));
   document.querySelectorAll(`#gantt-pane .g-row-bg[data-id="${id}"], #gantt-pane .g-row[data-id="${id}"] .g-row-bg`)
     .forEach(el => el.classList.add('selected'));
+  document.querySelectorAll('#pert-pane .pt-node.selected').forEach(el => el.classList.remove('selected'));
+  document.querySelector(`#pert-pane .pt-node[data-id="${id}"]`)?.classList.add('selected');
 }
 
 // ---------- cell edits ----------
@@ -262,9 +279,16 @@ function moveBlock(plan, i, k) {
   if (k >= i && k <= end) return false;
   const block = tasks.splice(i, end - i);
   const at = k > i ? k - block.length : k;
-  const above = tasks[at - 1], below = tasks[at];
+  let above = tasks[at - 1];
+  const below = tasks[at];
   const min = below ? below.level : 0;
-  const max = above ? above.level + (below && below.level > above.level ? 1 : 0) : 0;
+  let max = above ? above.level + (below && below.level > above.level ? 1 : 0) : 0;
+  if (above && state.hidden.has(above.id)) {
+    // Dropped just below a collapsed group: become its sibling, not a hidden child
+    let j = at - 1;
+    while (j > 0 && state.hidden.has(tasks[j].id)) j--;
+    max = tasks[j].level;
+  }
   const delta = Math.min(max, Math.max(min, block[0].level)) - block[0].level;
   for (const t of block) t.level += delta;
   tasks.splice(at, 0, ...block);
@@ -273,6 +297,29 @@ function moveBlock(plan, i, k) {
 
 function moveTask(id, k) {
   commit(plan => moveBlock(plan, plan.tasks.findIndex(t => t.id === id), k));
+}
+
+// Drag positions count visible rows only; convert one to a plan index.
+function planIndex(visibleIndex) {
+  const tasks = state.plan.tasks;
+  const vis = tasks.filter(t => !state.hidden.has(t.id));
+  return visibleIndex < vis.length ? tasks.indexOf(vis[visibleIndex]) : tasks.length;
+}
+
+// Collapse or expand a summary. This is a view change, so it is saved but not
+// added to the undo history.
+function toggleCollapse(id) {
+  const i = state.plan.tasks.findIndex(t => t.id === id);
+  if (i < 0 || !state.sched.byId.get(id).summary) return;
+  const t = state.plan.tasks[i];
+  t.collapsed = !t.collapsed;
+  if (t.collapsed) {
+    const end = subtreeEnd(state.plan.tasks, i);
+    const sel = state.plan.tasks.findIndex(x => x.id === state.selectedId);
+    if (sel > i && sel < end) state.selectedId = id;
+  }
+  persist();
+  render();
 }
 
 function runCommand(cmd) {
@@ -294,8 +341,9 @@ function runCommand(cmd) {
           t.level = sel.level;
           plan.tasks.splice(i, 0, t);
         } else {
-          // After the selected task's subtree, at the same level; or as first child of a summary
-          const isSummary = i + 1 < plan.tasks.length && plan.tasks[i + 1].level > sel.level;
+          // After the selected task's subtree, at the same level; or as first
+          // child of an expanded summary
+          const isSummary = !sel.collapsed && i + 1 < plan.tasks.length && plan.tasks[i + 1].level > sel.level;
           t.level = isSummary ? sel.level + 1 : sel.level;
           plan.tasks.splice(isSummary ? i + 1 : subtreeEnd(plan.tasks, i), 0, t);
         }
@@ -414,14 +462,14 @@ function printGantt() {
   const s = state.sched;
   $('#print-area').innerHTML = `<div class="print-title"><h1>${esc(state.plan.name)}</h1>
     <p>${fmtDate(s.start)} – ${fmtDate(s.finish)} · ${s.workdays} working days · Critical path in red · Printed ${new Date().toLocaleDateString()}</p></div>
-    ${ganttPrintSVG(state.plan, s, state.zoom)}`;
+    ${state.view === 'pert' ? pertPrintSVG(state.plan, s, state.hidden) : ganttPrintSVG(state.plan, s, state.zoom, state.hidden)}`;
   document.documentElement.dataset.theme = 'light'; // print in light colors even in dark mode
   window.print();
 }
 
-// The Gantt rules from style.css with light-theme colors substituted, so an
+// The chart (Gantt and PERT) rules from style.css with light-theme colors substituted, so an
 // exported image looks like the screen in light mode whatever the viewer uses.
-function ganttExportCSS() {
+function chartExportCSS() {
   const sheet = [...document.styleSheets].find(s => s.href?.endsWith('/style.css'));
   const rules = [...sheet.cssRules].filter(r => r instanceof CSSStyleRule);
   const vars = {};
@@ -430,7 +478,7 @@ function ganttExportCSS() {
     if (root[k].startsWith('--')) vars[root[k]] = root.getPropertyValue(root[k]).trim();
   }
   return rules
-    .filter(r => r.selectorText.split(',').every(s => s.trim().startsWith('.g-')))
+    .filter(r => r.selectorText.split(',').every(s => /^\.(g|pt)-/.test(s.trim())))
     .map(r => r.cssText.replace(/var\((--[\w-]+)\)/g, (m, v) => vars[v] ?? m))
     .join('\n');
 }
@@ -440,7 +488,10 @@ function ganttExportCSS() {
 const PNG_MAX_PIXELS = 16e6, PNG_MAX_SIDE = 16000;
 
 async function exportPNG() {
-  const { svg, width, height } = ganttStandaloneSVG(state.plan, state.sched, state.zoom, ganttExportCSS());
+  const pert = state.view === 'pert';
+  const { svg, width, height } = pert
+    ? pertStandaloneSVG(state.plan, state.sched, chartExportCSS(), state.hidden)
+    : ganttStandaloneSVG(state.plan, state.sched, state.zoom, chartExportCSS(), state.hidden);
   const scale = Math.min(2, PNG_MAX_SIDE / width, PNG_MAX_SIDE / height, Math.sqrt(PNG_MAX_PIXELS / (width * height)));
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   try {
@@ -455,7 +506,7 @@ async function exportPNG() {
     ctx.drawImage(img, 0, 0, width, height);
     const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
     if (!blob) throw new Error('the browser could not encode the image');
-    store.downloadBlob(`${store.safeFilename(state.plan.name)}-gantt.png`, blob);
+    store.downloadBlob(`${store.safeFilename(state.plan.name)}-${pert ? 'pert' : 'gantt'}.png`, blob);
     toast(scale < 1
       ? `Chart is very large, so it was exported at reduced resolution (${canvas.width}×${canvas.height}). Try a coarser zoom.`
       : `Exported ${canvas.width}×${canvas.height} PNG at the current zoom.`);
@@ -512,6 +563,7 @@ function wireEvents() {
     if (!tr) return;
     const id = Number(tr.dataset.id);
     select(id);
+    if (e.target.closest('[data-act="toggle"]') && e.detail < 2) toggleCollapse(id);
     if (e.target.closest('[data-act="unpin"]')) {
       commit(plan => { plan.tasks.find(t => t.id === id).manualStart = null; });
     }
@@ -547,8 +599,8 @@ function wireEvents() {
   });
 
   const dragOpts = {
-    canDrop: canMove,
-    onDrop: moveTask,
+    canDrop: (id, k) => canMove(id, planIndex(k)),
+    onDrop: (id, k) => moveTask(id, planIndex(k)),
     enabled: () => !state.readOnly && state.plan.tasks.length > 1,
   };
   attachReorder($('#table-pane'), {
@@ -564,9 +616,37 @@ function wireEvents() {
 
   $('#gantt-pane').addEventListener('click', e => {
     const el = e.target.closest('[data-id]');
+    if (!el) return;
+    select(Number(el.dataset.id));
+    if (e.target.closest('[data-act="toggle"]') && e.detail < 2) toggleCollapse(Number(el.dataset.id));
+  });
+  // Double-clicking a summary row collapses or expands it (in either view);
+  // on the triangle itself the first click already did that (the second is
+  // ignored), so a double-click there toggles once, like a single click.
+  const dblToggle = e => {
+    if (e.target.closest('[data-act="toggle"]')) return true;
+    const el = e.target.closest('[data-id]');
+    if (!el || !state.sched.byId.get(Number(el.dataset.id))?.summary) return false;
+    toggleCollapse(Number(el.dataset.id));
+    window.getSelection()?.removeAllRanges(); // the double-click also selected a word
+    return true;
+  };
+  tbody.addEventListener('dblclick', dblToggle);
+  $('#pert-pane').addEventListener('click', e => {
+    const el = e.target.closest('.pt-node');
     if (el) select(Number(el.dataset.id));
   });
+  // Double-click: a collapsed group expands (back to the full network);
+  // a task opens in the table for editing.
+  $('#pert-pane').addEventListener('dblclick', e => {
+    const el = e.target.closest('.pt-node');
+    if (!el || dblToggle(e)) return;
+    if (state.readOnly) return;
+    state.view = 'table'; savePrefs(); render();
+    document.querySelector(`#tbody tr[data-id="${el.dataset.id}"] input[data-f="name"]`)?.focus();
+  });
   $('#gantt-pane').addEventListener('dblclick', e => {
+    if (dblToggle(e)) return;
     const el = e.target.closest('[data-id]');
     if (!el || state.readOnly) return;
     if (state.view === 'gantt') { state.view = 'split'; savePrefs(); render(); }

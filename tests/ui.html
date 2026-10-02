@@ -180,6 +180,49 @@
       await click('undo');
       check(names().join('|') === before, 'order restored');
 
+      // ---- Collapse / expand ----
+      const visibleNames = () => [...d.querySelectorAll('#tbody tr[data-id] input[data-f="name"]')].map(i => i.value);
+      const gLabels = () => d.querySelectorAll('#gantt-pane .g-row').length;
+      const dbl = el => {
+        el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
+        el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 2 }));
+        el.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+      };
+      const rowsBefore = count();
+      dbl(gRow(5).querySelector('.g-label'));
+      await sleep(60);
+      check(count() === rowsBefore - 4 && !visibleNames().includes('Mechanical CAD') && gLabels() === rowsBefore - 4,
+        `double-click a Gantt summary hides its 4 subtasks (${count()} rows)`);
+      check(row(5).querySelector('.twisty').textContent === '▸', 'collapsed summary shows ▸');
+      check(cell(5, 'name').value === 'Detailed design' && row(5).nextElementSibling.querySelector('input[data-f="name"]').value === 'Build & test',
+        'rows after the group keep their row numbers');
+      dbl(cell(5, 'name'));
+      await sleep(60);
+      check(count() === rowsBefore && row(5).querySelector('.twisty').textContent === '▾', 'double-click the table row expands it');
+      // A double-click on the triangle toggles once
+      dbl(row(5).querySelector('.twisty'));
+      await sleep(60);
+      check(count() === rowsBefore - 4, 'double-click on the triangle collapses (toggles once)');
+      // + Task on a collapsed summary adds after the group and leaves it collapsed
+      cell(5, 'name').focus(); await sleep(20);
+      await click('add');
+      check(count() === rowsBefore - 3 && row(5).querySelector('.twisty').textContent === '▸'
+        && d.activeElement?.closest('tr') === row(5).nextElementSibling, '+ Task on a collapsed group adds a sibling after it');
+      await click('undo');
+      // Dragging a task to just below a collapsed group makes it a sibling, not a hidden child
+      const gIdx = name => [...d.querySelectorAll('#gantt-pane .g-row')].findIndex(g => g.textContent.includes(name));
+      const ganttRows = () => d.querySelectorAll('#gantt-pane .g-row');
+      const define = ganttRows()[gIdx('Define requirements')];
+      const bt = ganttRows()[gIdx('Build & test')];
+      await drag(define, top(bt) + 3);
+      check(visibleNames().includes('Define requirements') && count() === rowsBefore - 4,
+        'task dropped below a collapsed group stays visible as its sibling');
+      await click('undo');
+      // Click the triangle to expand again; state is saved without an undo step
+      row(5).querySelector('.twisty').dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
+      await sleep(60);
+      check(count() === rowsBefore, 'single click on the triangle expands');
+
       // ---- PNG export: capture the download instead of saving it ----
       const captured = new Promise(resolve => {
         const origURL = w.URL.createObjectURL, origClick = w.HTMLAnchorElement.prototype.click;
@@ -210,6 +253,33 @@
         check(red > 100, `critical path drawn in red (${red} sampled red pixels)`);
         document.body.insertAdjacentHTML('beforeend', `<h2>Exported PNG</h2><img id="png-out" style="max-width:100%;border:1px solid #ccc" src="${bmp.src}">`);
       }
+
+      // ---- PERT tab ----
+      d.querySelector('.tabs button[data-view="pert"]').click();
+      await sleep(80);
+      const nodes = d.querySelectorAll('#pert-pane .pt-node');
+      const leafRows = [...d.querySelectorAll('#tbody tr[data-id]')].filter(tr => !tr.classList.contains('summary')).length;
+      check(nodes.length === leafRows && d.getElementById('zoom').disabled, `PERT tab draws one box per task (${nodes.length}); zoom disabled`);
+      check(d.querySelectorAll('#pert-pane .pt-node.critical').length === d.querySelectorAll('#tbody tr.critical').length,
+        'PERT critical boxes match critical rows');
+      const fw = [...nodes].find(n => n.textContent.includes('Firmware'));
+      fw.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
+      await sleep(20);
+      check(fw.classList.contains('selected') && d.querySelector('#tbody tr.selected input[data-f="name"]').value === 'Firmware',
+        'clicking a PERT box selects that task');
+      const pngPert = new Promise(resolve => {
+        const orig = w.HTMLAnchorElement.prototype.click;
+        w.HTMLAnchorElement.prototype.click = function () { w.HTMLAnchorElement.prototype.click = orig; resolve(this.download); };
+      });
+      d.getElementById('btn-png').click();
+      const pertName = await Promise.race([pngPert, sleep(5000).then(() => null)]);
+      check(/-pert\.png$/.test(pertName || ''), `Export PNG on the PERT tab exports the diagram (${pertName})`);
+      fw.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+      await sleep(60);
+      check(d.getElementById('main').className === 'view-table' && d.activeElement?.value === 'Firmware',
+        'double-clicking a PERT task opens it in the table');
+      d.querySelector('.tabs button[data-view="split"]').click();
+      await sleep(60);
 
       // Persistence: reload the frame, plan is still there with edits
       const name = d.getElementById('plan-name').textContent;

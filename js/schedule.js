@@ -180,6 +180,18 @@ export function schedule(plan) {
   };
 }
 
+// Ids of rows hidden under a collapsed summary. Each summary keeps its own
+// `collapsed` flag, so expanding a parent restores nested groups as they were.
+export function hiddenIds(plan, sched) {
+  const hidden = new Set();
+  let under = null; // level of the collapsed summary we are inside, if any
+  sched.rows.forEach((r, i) => {
+    if (under !== null && r.level > under) { hidden.add(r.id); return; }
+    under = r.summary && plan.tasks[i].collapsed ? r.level : null;
+  });
+  return hidden;
+}
+
 const CONFLICT = {
   FS: row => `Starts before predecessor ${row} finishes`,
   SS: row => `Starts before predecessor ${row} starts (SS)`,

@@ -3,7 +3,7 @@
 // or open tests/index.html in a browser.
 
 import { Calendar, parseISO, toISO } from '../js/calendar.js';
-import { schedule, durationBetween, linkDrives } from '../js/schedule.js';
+import { schedule, durationBetween, linkDrives, hiddenIds } from '../js/schedule.js';
 import { parsePredList, formatLink } from '../js/table.js';
 import { normalize } from '../js/storage.js';
 
@@ -194,6 +194,26 @@ test('normalize upgrades bare-id predecessors and drops bad links', () => {
     { id: 2, name: 'b', duration: 1, preds: [1, { id: 1, type: 'SS' }, { id: 1, type: 'XX' }, 'junk'] },
   ] });
   eq(p.tasks[1].preds, [{ id: 1, type: 'FS' }, { id: 1, type: 'SS' }]);
+});
+
+test('collapsed groups hide descendants; nested state survives', () => {
+  // P > (A, S > (B), C)
+  const P = T('P', 0, [], { level: 0 }), A = T('A', 1, [], { level: 1 }), S = T('S', 0, [], { level: 1 });
+  const B = T('B', 1, [], { level: 2 }), C = T('C', 1, [], { level: 1 }), D = T('D', 1);
+  const p = plan([P, A, S, B, C, D]);
+  const ids = () => [...hiddenIds(p, schedule(p))].sort((x, y) => x - y);
+  S.collapsed = true;
+  eq(ids(), [B.id], 'inner collapsed:');
+  P.collapsed = true;
+  eq(ids(), [A.id, S.id, B.id, C.id], 'both collapsed:');
+  P.collapsed = false;
+  eq(ids(), [B.id], 'outer expanded, inner still collapsed:');
+  S.collapsed = false; P.collapsed = true;
+  eq(ids(), [A.id, S.id, B.id, C.id], 'outer collapsed, inner expanded:');
+  P.collapsed = false;
+  eq(ids(), [], 'all expanded:');
+  A.collapsed = true; // flag on a non-summary has no effect
+  eq(ids(), []);
 });
 
 test('durationBetween counts working days inclusive', () => {

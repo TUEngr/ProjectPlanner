@@ -86,7 +86,7 @@ function labels(vis, selectedId) {
       ? `<text class="g-twisty" data-act="toggle" x="${x + 4}" y="${y + 17}" text-anchor="middle">${t.collapsed ? '▸' : '▾'}<title>${t.collapsed ? 'Expand' : 'Collapse'} (or double-click the row)</title></text>`
       : '';
     const cls = ['g-label', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '', r.id === selectedId ? 'selected' : ''].join(' ');
-    const warn = r.issues.length ? `<tspan class="g-warn">⚠<title>${esc(r.issues.join('\n'))}</title></tspan> ` : '';
+    const warn = r.issues.length ? `<tspan class="g-warn" data-tip="${esc(r.issues.join('\n'))}">⚠</tspan> ` : '';
     const pin = r.pinned ? ' 📌' : '';
     out.push(`<g class="g-row" data-id="${r.id}">`
       + `<rect class="g-row-bg${r.id === selectedId ? ' selected' : ''}" x="0" y="${y}" width="${LABEL_W}" height="${ROW}"/>`

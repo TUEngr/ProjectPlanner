@@ -50,6 +50,32 @@ function toast(msg, kind = '') {
   toastTimer = setTimeout(() => { el.className = ''; }, kind === 'error' ? 5000 : 2500);
 }
 
+// ---------- tooltips ----------
+// Native title tooltips need a ~1 s hover, often don't appear (Safari with
+// the window unfocused) and never appear on touch screens. Elements with
+// data-tip get an immediate tooltip on hover, keyboard focus, or tap.
+
+function showTip(el) {
+  const tip = $('#tip');
+  tip.textContent = el.dataset.tip;
+  tip.hidden = false;
+  const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - t.width / 2), window.innerWidth - t.width - 8);
+  const below = r.bottom + 6 + t.height <= window.innerHeight - 8;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${below ? r.bottom + 6 : r.top - 6 - t.height}px`;
+}
+function hideTip() { $('#tip').hidden = true; }
+
+function wireTips() {
+  const over = e => { const el = e.target.closest?.('[data-tip]'); if (el) showTip(el); else hideTip(); };
+  document.addEventListener('pointerover', over);
+  document.addEventListener('focusin', over);
+  document.addEventListener('focusout', hideTip);
+  document.addEventListener('scroll', hideTip, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); });
+}
+
 // ---------- plan lifecycle ----------
 
 function openPlan(plan, { readOnly = false } = {}) {
@@ -120,6 +146,7 @@ function render({ scrollGantt = false } = {}) {
   const focusRow = active?.closest?.('tr[data-id]')?.dataset.id;
   const focusField = active?.dataset?.f;
 
+  hideTip(); // its anchor is about to be replaced
   $('#plan-name').textContent = plan.name;
   document.title = `${plan.name} – Project Planner`;
   $('#main').className = `view-${state.view}`;
@@ -560,6 +587,7 @@ function loadInitialPlan() {
 // ---------- events ----------
 
 function wireEvents() {
+  wireTips();
   const tbody = $('#tbody');
 
   tbody.addEventListener('focusin', e => {

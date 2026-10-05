@@ -256,6 +256,13 @@ dialog label input, dialog label textarea, #share-url {
 #toast.show { opacity: 1; transform: translateX(-50%); }
 #toast.error { background: var(--crit); color: #fff; }
 
+#tip {
+  position: fixed; z-index: 60; max-width: 320px; pointer-events: none;
+  background: var(--fg); color: var(--bg); padding: 6px 9px; border-radius: 6px;
+  font-size: 12.5px; line-height: 1.35; white-space: pre-line; box-shadow: 0 2px 8px rgb(0 0 0 / .2);
+}
+.g-warn { cursor: help; }
+
 #print-area { display: none; }
 
 @media (max-width: 700px) {

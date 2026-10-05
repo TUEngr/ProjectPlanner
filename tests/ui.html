@@ -77,6 +77,15 @@
       // Pin a start date earlier than the predecessor allows -> warning
       await edit(3, 'start', cell(2, 'start').value);
       check(row(3).querySelector('.c-date.pinned') && row(3).classList.contains('has-issue'), 'pinned conflicting start is kept and flagged ⚠');
+      const tipEl = d.getElementById('tip');
+      const hover = el => el.dispatchEvent(new w.PointerEvent('pointerover', { bubbles: true }));
+      hover(row(3).querySelector('.flag'));
+      check(!tipEl.hidden && /predecessor 2 finishes/.test(tipEl.textContent) && tipEl.getBoundingClientRect().width > 0,
+        `hovering ⚠ shows the conflict at once ("${tipEl.textContent}")`);
+      hover(row(4).querySelector('.flag.ms'));
+      check(!tipEl.hidden && /Milestone/.test(tipEl.textContent), 'hovering ◆ shows "Milestone"');
+      hover(cell(4, 'notes'));
+      check(tipEl.hidden, 'tooltip hides when the pointer leaves');
       row(3).querySelector('[data-act="unpin"]').click();
       await sleep(60);
       check(!row(3).querySelector('.c-date.pinned') && !row(3).classList.contains('has-issue'), 'unpin clears pin and warning');

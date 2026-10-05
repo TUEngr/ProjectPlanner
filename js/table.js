@@ -37,11 +37,11 @@ export function renderTable(tbody, plan, sched, { selectedId = null, readOnly = 
     const cls = [r.summary && 'summary', !r.summary && r.critical && 'critical', r.milestone && 'milestone',
       r.id === selectedId && 'selected', r.issues.length && 'has-issue'].filter(Boolean).join(' ');
     const flag = r.issues.length
-      ? `<span class="flag" title="${esc(r.issues.join('\n'))}">⚠</span>`
-      : r.milestone ? '<span class="flag ms" title="Milestone">◆</span>' : '';
+      ? `<span class="flag" tabindex="0" data-tip="${esc(r.issues.join('\n'))}" aria-label="Warning: ${esc(r.issues.join('; '))}">⚠</span>`
+      : r.milestone ? '<span class="flag ms" tabindex="0" data-tip="Milestone (zero duration)" aria-label="Milestone">◆</span>' : '';
     const unpin = r.pinned && !readOnly
-      ? `<button class="unpin" data-act="unpin" title="Pinned start date. Click to unpin and schedule from predecessors.">📌</button>`
-      : r.pinned ? '<span class="unpin" title="Pinned start date">📌</span>' : '';
+      ? `<button class="unpin" data-act="unpin" data-tip="Pinned start date. Click to unpin and schedule from predecessors." aria-label="Unpin start date">📌</button>`
+      : r.pinned ? '<span class="unpin" tabindex="0" data-tip="Pinned start date" aria-label="Pinned start date">📌</span>' : '';
     const twisty = r.summary
       ? `<button class="twisty" data-act="toggle" style="left:${4 + r.level * 18}px" tabindex="-1" aria-expanded="${!t.collapsed}" title="${t.collapsed ? 'Expand' : 'Collapse'} (or double-click the row)">${t.collapsed ? '▸' : '▾'}</button>`
       : '';

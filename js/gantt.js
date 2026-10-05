@@ -87,7 +87,7 @@ function labels(vis, selectedId) {
       : '';
     const cls = ['g-label', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '', r.id === selectedId ? 'selected' : ''].join(' ');
     const warn = r.issues.length ? `<tspan class="g-warn" data-tip="${esc(r.issues.join('\n'))}">⚠</tspan> ` : '';
-    const pin = r.pinned ? ' 📌' : '';
+    const pin = r.pinned ? ` <tspan class="g-pin" data-tip="Pinned start date: ${r.start}. The task stays there instead of following its predecessors.">📌</tspan>` : '';
     out.push(`<g class="g-row" data-id="${r.id}">`
       + `<rect class="g-row-bg${r.id === selectedId ? ' selected' : ''}" x="0" y="${y}" width="${LABEL_W}" height="${ROW}"/>`
       + `<text class="g-rownum" x="26" y="${y + 17}" text-anchor="end">${r.row}</text>`

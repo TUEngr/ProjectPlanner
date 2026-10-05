@@ -213,6 +213,10 @@ dialog {
   border: 1px solid var(--border); border-radius: 10px; padding: 20px 22px;
   background: var(--bg); color: var(--fg); width: min(560px, calc(100vw - 32px));
 }
+fieldset.weekend { border: 1px solid var(--border); border-radius: 6px; margin: 12px 0 0; padding: 4px 12px 8px; }
+fieldset.weekend legend { font-weight: 600; padding: 0 4px; }
+dialog label.check { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-weight: 400; }
+dialog label.check input { display: inline-block; width: auto; margin: 0; }
 dialog::backdrop { background: rgb(0 0 0 / .35); }
 dialog h2 { margin: 0 0 12px; font-size: 18px; }
 dialog label { display: block; margin: 10px 0; font-weight: 600; }

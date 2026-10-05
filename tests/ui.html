@@ -119,6 +119,20 @@
       await click('undo'); await click('undo');
       check(cell(7, 'preds').value === '4' && cell(8, 'preds').value === '7', 'undo restores FS links');
 
+      // ---- Weekend settings ----
+      d.getElementById('btn-settings').click();
+      await sleep(40);
+      const sf = d.getElementById('settings-form');
+      check(sf.satOff.checked && sf.sunOff.checked, 'Settings: both weekend boxes checked by default');
+      const fin16 = cell(16, 'finish').value;
+      sf.satOff.checked = false;
+      sf.querySelector('button[value="save"]').click();
+      await sleep(80);
+      check(cell(16, 'finish').value < fin16, `working Saturdays pulls the finish in (${fin16} → ${cell(16, 'finish').value})`);
+      check(!d.getElementById('dlg-settings').open, 'settings dialog closed on save');
+      await click('undo');
+      check(cell(16, 'finish').value === fin16, 'undo restores weekends off');
+
       // ---- Reordering ----
       d.querySelector('.tabs button[data-view="split"]').click();
       await sleep(60);

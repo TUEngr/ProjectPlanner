@@ -216,6 +216,25 @@ test('collapsed groups hide descendants; nested state survives', () => {
   eq(ids(), []);
 });
 
+test('working Saturdays and/or Sundays', () => {
+  // Starts Fri 2026-10-09, 3 days
+  const run = opts => { nextId = 900; const a = T('a', 3); return schedule(plan([a], { start: '2026-10-09', ...opts })).rows[0]; };
+  eq([run({}).start, run({}).finish], ['2026-10-09', '2026-10-13'], 'default weekends off:');
+  eq(run({ satOff: false }).finish, '2026-10-12', 'Saturday worked:');   // Fri, Sat, Mon
+  eq(run({ sunOff: false }).finish, '2026-10-12', 'Sunday worked:');     // Fri, Sun, Mon
+  eq(run({ satOff: false, sunOff: false }).finish, '2026-10-11', '7-day week:');
+  const cal = new Calendar('2026-10-05', [{ date: '2026-10-10' }], { satOff: false });
+  eq(cal.isWorkday(parseISO('2026-10-10')), false, 'holiday on a worked Saturday stays off:');
+  eq(cal.isWorkday(parseISO('2026-10-17')), true);
+});
+
+test('normalize defaults both weekend days to non-working', () => {
+  const p = normalize({ start: '2026-10-05', tasks: [] });
+  eq([p.satOff, p.sunOff], [true, true]);
+  const q = normalize({ start: '2026-10-05', tasks: [], satOff: false });
+  eq([q.satOff, q.sunOff], [false, true]);
+});
+
 test('durationBetween counts working days inclusive', () => {
   const cal = new Calendar('2026-10-05', []);
   eq(durationBetween(cal, parseISO('2026-10-05'), parseISO('2026-10-09')), 5);

@@ -38,7 +38,7 @@ function layout(sched, zoom, nRows) {
   return { px, from, to, width, height, x: n => (n - from) * px };
 }
 
-function header(L, zoom) {
+function header(L, zoom, cal) {
   const out = [];
   out.push(`<rect class="g-head-bg" x="0" y="0" width="${L.width}" height="${HEAD}"/>`);
   // Top band: months (or years in month zoom)
@@ -56,8 +56,7 @@ function header(L, zoom) {
   if (zoom === 'day') {
     for (let n = L.from; n < L.to; n++) {
       const x = L.x(n), { d } = ymd(n);
-      const dow = dayOfWeek(n);
-      out.push(`<text class="g-head-text small${dow === 0 || dow === 6 ? ' muted' : ''}" x="${x + L.px / 2}" y="${HEAD - 7}" text-anchor="middle">${d}</text>`);
+      out.push(`<text class="g-head-text small${cal.isWorkday(n) ? '' : ' muted'}" x="${x + L.px / 2}" y="${HEAD - 7}" text-anchor="middle">${d}</text>`);
     }
   } else if (zoom === 'week') {
     for (let n = L.from; n < L.to; n += 7) {
@@ -226,7 +225,7 @@ export function renderGantt(container, plan, sched, { zoom = 'day', selectedId =
     <div class="gantt-grid" style="grid-template-columns:${LABEL_W}px ${L.width}px">
       <div class="g-corner"><svg width="${LABEL_W}" height="${HEAD}"><rect class="g-head-bg" width="${LABEL_W}" height="${HEAD}"/>
         <text class="g-head-text" x="10" y="${HEAD - 10}">Task</text></svg></div>
-      <div class="g-head"><svg width="${L.width}" height="${HEAD}">${header(L, zoom)}</svg></div>
+      <div class="g-head"><svg width="${L.width}" height="${HEAD}">${header(L, zoom, sched.cal)}</svg></div>
       <div class="g-labels"><svg width="${LABEL_W}" height="${H}">${labels(vis, selectedId)}</svg></div>
       <div class="g-body"><svg width="${L.width}" height="${H}">${DEFS}${body(sched, vis, hidden, L, selectedId)}</svg></div>
     </div>`;
@@ -245,7 +244,7 @@ function wholeChart(plan, sched, zoom, hidden) {
   const inner = `${DEFS}
     <g transform="translate(${LABEL_W},${HEAD})">${body(sched, vis, hidden, L, null)}</g>
     <g transform="translate(0,${HEAD})">${labels(vis, null)}</g>
-    <g transform="translate(${LABEL_W},0)">${header(L, zoom)}</g>
+    <g transform="translate(${LABEL_W},0)">${header(L, zoom, sched.cal)}</g>
     <rect class="g-head-bg" width="${LABEL_W}" height="${HEAD}"/><text class="g-head-text" x="10" y="${HEAD - 10}">Task</text>`;
   return { W, H, inner };
 }

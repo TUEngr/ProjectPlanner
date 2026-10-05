@@ -76,7 +76,7 @@ export function blankTask(id) {
 
 export function newPlan(name = 'Untitled project') {
   return {
-    format: FORMAT_VERSION, id: uid(), name, start: nextMonday(), holidays: [],
+    format: FORMAT_VERSION, id: uid(), name, start: nextMonday(), holidays: [], satOff: true, sunOff: true,
     tasks: [{ ...blankTask(1), name: 'First task', duration: 5 }],
     nextId: 2,
   };
@@ -118,6 +118,8 @@ export function normalize(obj) {
     holidays: Array.isArray(obj.holidays)
       ? obj.holidays.filter(h => h && parseISO(h.date) !== null).map(h => ({ date: h.date, label: String(h.label ?? '') }))
       : [],
+    satOff: obj.satOff !== false, // older plans: weekends off
+    sunOff: obj.sunOff !== false,
     tasks,
     nextId: Math.max(next, Number(obj.nextId) || 0),
     updated: obj.updated,

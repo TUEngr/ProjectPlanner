@@ -96,7 +96,13 @@
       <label>Holidays / non-working days
         <textarea name="holidays" rows="8" placeholder="2026-11-26 Thanksgiving&#10;2026-11-27"></textarea>
       </label>
-      <p class="hint">One date per line, as YYYY-MM-DD, optionally followed by a label. Weekends are always non-working.</p>
+      <p class="hint">One date per line, as YYYY-MM-DD, optionally followed by a label.</p>
+      <fieldset class="weekend">
+        <legend>Weekends</legend>
+        <label class="check"><input type="checkbox" name="satOff"> Saturdays are non-working days</label>
+        <label class="check"><input type="checkbox" name="sunOff"> Sundays are non-working days</label>
+        <p class="hint">Uncheck a day to schedule work on it, e.g. for a team that works Saturdays.</p>
+      </fieldset>
       <div class="dlg-buttons">
         <button value="save" class="primary">Save</button>
         <button value="cancel" formnovalidate>Cancel</button>
@@ -122,7 +128,7 @@
       <li><strong>Views</strong>: <em>Table</em>, <em>Gantt</em>, and <em>PERT</em> show one view each. <em>Table/Gantt</em> and <em>Table/PERT</em> show the table above the chart. The selected task is highlighted in every view.</li>
       <li><strong>Adding tasks</strong>: <em>+ Task</em> adds a row after the selected task (or as the first subtask of a selected summary). <em>Insert</em> adds a row above it. Pressing Enter in the last row's name also adds a task. <em>Delete</em> removes the selected task; its subtasks move up one level and links to it are removed.</li>
       <li><strong>Keyboard</strong>: Enter / Shift+Enter commits a cell and moves down / up the column. Esc cancels the edit. ⌘/Ctrl+Z undoes; ⌘/Ctrl+Shift+Z or Ctrl+Y redoes.</li>
-      <li><strong>Durations</strong> are in working days (Mon–Fri, minus holidays from <em>Settings</em>). Type <code>5</code>, <code>5d</code>, or <code>2w</code>. A duration of <code>0</code> makes a milestone ◆.</li>
+      <li><strong>Durations</strong> are in working days: Monday to Friday, plus Saturday and/or Sunday if they are unchecked in <em>Settings</em>, minus holidays. Type <code>5</code>, <code>5d</code>, or <code>2w</code>. A duration of <code>0</code> makes a milestone ◆.</li>
       <li><strong>Predecessors</strong>: list row numbers, e.g. <code>2, 5SS, 7FF</code>. A bare number is finish-to-start (this task starts after row 2 finishes). <code>SS</code> is start-to-start (starts no earlier than row 5 starts). <code>FF</code> is finish-to-finish (finishes no earlier than row 7 finishes). With several predecessors, the latest constraint wins. Summary tasks can't have predecessors or be one; link their subtasks instead.</li>
       <li><strong>Dates</strong>: start and finish are calculated. Typing a <em>Start</em> date pins the task there 📌; click the pin to release it. Typing a <em>Finish</em> date changes the duration.</li>
       <li><strong>⚠ warnings</strong> mark problems: a pinned date that breaks a link (it starts before an FS predecessor finishes, starts before an SS predecessor starts, or finishes before an FF predecessor finishes), a circular dependency, or a link to a summary task. Hover the ⚠ for details.</li>
@@ -130,7 +136,7 @@
       <li><strong>Reordering</strong>: drag a row in the Gantt chart, or drag the row number (⠿) in the table, up or down. A summary task moves with its subtasks. The ↑ / ↓ buttons move the selected task past its neighbor. Links follow the tasks, so predecessor row numbers update automatically.</li>
       <li><strong>Critical path</strong> (red) is the chain of tasks with zero float: any slip in them delays the finish. <em>Float</em> is how many working days a task can slip without delaying the project. Links that drive the critical path are drawn in red.</li>
       <li><strong>Gantt chart</strong>: FS arrows run from the end of one bar to the start of the next; SS arrows join the left ends of the bars and FF arrows the right ends. The dark stripe inside a bar is % done, the dashed green line is today, and shaded columns are non-working days. Click a row to select it; double-click a task to edit it in the table (double-clicking a summary collapses it instead).</li>
-      <li><strong>Settings</strong> (or click the plan name): rename the plan, set the project start date, and list holidays, one <code>YYYY-MM-DD</code> per line with an optional label.</li>
+      <li><strong>Settings</strong> (or click the plan name): rename the plan, set the project start date, list holidays (one <code>YYYY-MM-DD</code> per line with an optional label), and choose whether Saturdays and Sundays are non-working days (both are by default). Changing these reschedules every task.</li>
       <li><strong>Plans</strong>: keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
       <li><strong>Saving</strong>: plans save automatically in this browser only. Use <em>Save file</em> / <em>Open file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
       <li><strong>Share link</strong>: copies a link containing a read-only snapshot of the plan. Recipients can view it and click <em>Save a copy to my plans</em> to edit their own copy. Later edits are not included; share again to send an update. The plan is packed into the link itself, so nothing is uploaded, but very large plans make long links.</li>

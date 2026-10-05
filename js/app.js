@@ -420,6 +420,8 @@ function showSettings() {
   f.name.value = state.plan.name;
   f.start.value = state.plan.start;
   f.holidays.value = state.plan.holidays.map(h => `${h.date}${h.label ? ' ' + h.label : ''}`).join('\n');
+  f.satOff.checked = state.plan.satOff !== false;
+  f.sunOff.checked = state.plan.sunOff !== false;
   $('#dlg-settings').showModal();
 }
 
@@ -441,6 +443,8 @@ function saveSettings() {
     plan.name = f.name.value.trim() || 'Untitled project';
     plan.start = start;
     plan.holidays = holidays;
+    plan.satOff = f.satOff.checked;
+    plan.sunOff = f.sunOff.checked;
   });
   if (bad.length) toast(`Ignored ${bad.length} line(s) that did not start with a YYYY-MM-DD date.`, 'error');
 }

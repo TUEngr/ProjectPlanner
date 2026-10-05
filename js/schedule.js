@@ -1,7 +1,8 @@
 // Critical-path scheduler.
 //
 // Plan model:
-//   { name, start: 'YYYY-MM-DD', holidays: [{date, label}], tasks: [Task] }
+//   { name, start: 'YYYY-MM-DD', holidays: [{date, label}], satOff, sunOff, tasks: [Task] }
+//   satOff / sunOff: every Saturday / Sunday is non-working (default true)
 //   Task = { id, name, level, duration, preds: [Link], manualStart: 'YYYY-MM-DD'|null,
 //            pct, assignee, notes }
 //   Link = { id, type: 'FS'|'SS'|'FF' } (a bare id is accepted as FS)
@@ -46,7 +47,7 @@ export function linkDrives(p, s, type) {
 }
 
 export function schedule(plan) {
-  const cal = new Calendar(plan.start, plan.holidays);
+  const cal = new Calendar(plan.start, plan.holidays, { satOff: plan.satOff !== false, sunOff: plan.sunOff !== false });
   const tasks = plan.tasks;
   const n = tasks.length;
   const res = new Map(); // id -> result

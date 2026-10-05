@@ -28,7 +28,10 @@ export function dayOfWeek(n) {
 }
 
 export class Calendar {
-  constructor(startISO, holidays = []) {
+  // satOff / sunOff: whether every Saturday / Sunday is a non-working day.
+  constructor(startISO, holidays = [], { satOff = true, sunOff = true } = {}) {
+    this.satOff = satOff;
+    this.sunOff = sunOff;
     this.origin = parseISO(startISO);
     if (this.origin === null) throw new Error(`Invalid project start date: ${startISO}`);
     this.holidays = new Set();
@@ -42,7 +45,7 @@ export class Calendar {
 
   isWorkday(n) {
     const dow = dayOfWeek(n);
-    return dow !== 0 && dow !== 6 && !this.holidays.has(n);
+    return !(dow === 6 && this.satOff) && !(dow === 0 && this.sunOff) && !this.holidays.has(n);
   }
 
   // Working index -> day number.

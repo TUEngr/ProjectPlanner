@@ -109,7 +109,7 @@ function nodeSVG(r, t, { x, y }, selectedId) {
   const tip = `${r.row}. ${t.name}\n${r.start}${r.milestone ? '' : ' → ' + r.finish}`
     + (r.summary ? '\nCollapsed group (double-click to expand)' : '')
     + (r.issues.length ? '\n⚠ ' + r.issues.join('\n⚠ ') : '');
-  return `<g class="${cls}" data-id="${r.id}" transform="translate(${x},${y})"><title>${esc(tip)}</title>`
+  return `<g class="${cls}" data-id="${r.id}" data-tip="${esc(tip)}" transform="translate(${x},${y})">`
     + `<rect class="pt-box" width="${W}" height="${H}" rx="4"/>`
     + `<path class="pt-head" d="M0,4 a4,4 0 0 1 4,-4 H${W - 4} a4,4 0 0 1 4,4 V24 H0 Z"/>`
     + `<line class="pt-rule" x1="0" y1="24" x2="${W}" y2="24"/>`

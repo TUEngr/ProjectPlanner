@@ -84,6 +84,9 @@
         `hovering ⚠ shows the conflict at once ("${tipEl.textContent}")`);
       hover(row(4).querySelector('.flag.ms'));
       check(!tipEl.hidden && /Milestone/.test(tipEl.textContent), 'hovering ◆ shows "Milestone"');
+      hover(d.querySelector('#gantt-pane .g-task[data-id="13"] .g-bar'));
+      check(!tipEl.hidden && /^13\. Firmware/.test(tipEl.textContent) && /float/.test(tipEl.textContent),
+        `hovering a Gantt bar shows its details ("${tipEl.textContent.split('\n')[0]}")`);
       hover(cell(4, 'notes'));
       check(tipEl.hidden, 'tooltip hides when the pointer leaves');
       row(3).querySelector('[data-act="unpin"]').click();
@@ -286,6 +289,9 @@
       check(d.querySelectorAll('#pert-pane .pt-node.critical').length === d.querySelectorAll('#tbody tr.critical').length,
         'PERT critical boxes match critical rows');
       const fw = [...nodes].find(n => n.textContent.includes('Firmware'));
+      d.getElementById('tip').hidden = true;
+      fw.querySelector('.pt-box').dispatchEvent(new w.PointerEvent('pointerover', { bubbles: true }));
+      check(!d.getElementById('tip').hidden && /Firmware/.test(d.getElementById('tip').textContent), 'hovering a PERT box shows its details');
       fw.dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
       await sleep(20);
       check(fw.classList.contains('selected') && d.querySelector('#tbody tr.selected input[data-f="name"]').value === 'Firmware',

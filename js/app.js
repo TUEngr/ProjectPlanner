@@ -56,6 +56,7 @@ function toast(msg, kind = '') {
 // data-tip get an immediate tooltip on hover, keyboard focus, or tap.
 
 function showTip(el) {
+  if (document.body.classList.contains('dragging-row')) return hideTip();
   const tip = $('#tip');
   tip.textContent = el.dataset.tip;
   tip.hidden = false;
@@ -72,6 +73,8 @@ function wireTips() {
   document.addEventListener('pointerover', over);
   document.addEventListener('focusin', over);
   document.addEventListener('focusout', hideTip);
+  // A mouse press (click or the start of a drag) dismisses it; a touch tap shows it
+  document.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') hideTip(); });
   document.addEventListener('scroll', hideTip, true);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); });
 }

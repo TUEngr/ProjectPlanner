@@ -83,7 +83,7 @@ function labels(vis, selectedId) {
     const y = i * ROW;
     const x = 36 + r.level * 14;
     const twisty = r.summary
-      ? `<text class="g-twisty" data-act="toggle" x="${x + 4}" y="${y + 17}" text-anchor="middle">${t.collapsed ? '▸' : '▾'}<title>${t.collapsed ? 'Expand' : 'Collapse'} (or double-click the row)</title></text>`
+      ? `<text class="g-twisty" data-act="toggle" x="${x + 4}" y="${y + 17}" text-anchor="middle" data-tip="${t.collapsed ? 'Expand' : 'Collapse'} (or double-click the row)">${t.collapsed ? '▸' : '▾'}</text>`
       : '';
     const cls = ['g-label', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '', r.id === selectedId ? 'selected' : ''].join(' ');
     const warn = r.issues.length ? `<tspan class="g-warn" data-tip="${esc(r.issues.join('\n'))}">⚠</tspan> ` : '';
@@ -126,7 +126,7 @@ function body(sched, vis, hidden, L, selectedId) {
   const today = todayDay();
   if (today >= L.from && today < L.to) {
     const x = L.x(today) + L.px / 2;
-    out.push(`<line class="g-today" x1="${x}" y1="0" x2="${x}" y2="${L.height}"><title>Today ${toISO(today)}</title></line>`);
+    out.push(`<line class="g-today" x1="${x}" y1="0" x2="${x}" y2="${L.height}" data-tip="Today ${toISO(today)}"/>`);
   }
 
   const index = new Map(rows.map((r, i) => [r.id, i]));
@@ -187,10 +187,10 @@ function body(sched, vis, hidden, L, selectedId) {
   // Bars
   vis.forEach(({ r, t }) => {
     const g = geom(r);
-    const tip = `<title>${esc(`${r.row}. ${t.name}\n${r.start}${r.milestone ? '' : ' → ' + r.finish}`
+    const tip = esc(`${r.row}. ${t.name}\n${r.start}${r.milestone ? '' : ' → ' + r.finish}`
       + `${r.summary ? '' : `\n${r.duration} working day${r.duration === 1 ? '' : 's'}, float ${r.float ?? '?'}`}`
       + `${r.pct ? `\n${r.pct}% complete` : ''}${t.assignee ? `\n${t.assignee}` : ''}`
-      + `${r.issues.length ? '\n⚠ ' + r.issues.join('\n⚠ ') : ''}`)}</title>`;
+      + `${r.issues.length ? '\n⚠ ' + r.issues.join('\n⚠ ') : ''}`);
     const conflict = r.issues.length ? ' conflict' : '';
     let shape;
     if (r.summary) {
@@ -206,7 +206,7 @@ function body(sched, vis, hidden, L, selectedId) {
         + (pw > 0 ? `<rect class="g-progress${r.critical ? ' critical' : ''}" x="${g.x1}" y="${y + h / 2 - 2}" width="${pw}" height="4"/>` : '');
     }
     const note = t.assignee ? `<text class="g-bar-text" x="${g.x2 + (ffEnds.has(r.id) ? 14 : 6)}" y="${g.mid + 4}">${esc(t.assignee)}</text>` : '';
-    out.push(`<g class="g-task" data-id="${r.id}">${shape}${note}${tip}</g>`);
+    out.push(`<g class="g-task" data-id="${r.id}" data-tip="${tip}">${shape}${note}</g>`);
   });
   return out.join('');
 }

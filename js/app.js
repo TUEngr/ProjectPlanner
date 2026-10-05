@@ -130,6 +130,8 @@ function render({ scrollGantt = false } = {}) {
   const pane = $('#gantt-pane');
   const { scrollLeft, scrollTop } = pane;
   renderGantt(pane, plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden });
+  // Keep the floating zoom control clear of the pane's vertical scrollbar
+  $('#gantt-wrap').style.setProperty('--sbw', `${pane.offsetWidth - pane.clientWidth}px`);
   if (scrollGantt) scrollToDay(pane, state.sched, state.zoom, state.sched.startDay);
   else { pane.scrollLeft = scrollLeft; pane.scrollTop = scrollTop; }
   if (showsPert()) {

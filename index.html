@@ -52,13 +52,6 @@
       <button data-cmd="undo" title="Undo (Ctrl/⌘+Z)">Undo</button>
       <button data-cmd="redo" title="Redo (Ctrl/⌘+Shift+Z)">Redo</button>
     </div>
-    <label class="zoom">Zoom
-      <select id="zoom">
-        <option value="day">Days</option>
-        <option value="week">Weeks</option>
-        <option value="month">Months</option>
-      </select>
-    </label>
   </div>
 
   <main id="main" class="view-table">
@@ -68,7 +61,16 @@
         <tbody id="tbody"></tbody>
       </table>
     </section>
-    <section id="gantt-pane" class="pane gantt-scroll"></section>
+    <div id="gantt-wrap">
+      <label class="zoom">Zoom
+        <select id="zoom">
+          <option value="day">Days</option>
+          <option value="week">Weeks</option>
+          <option value="month">Months</option>
+        </select>
+      </label>
+      <section id="gantt-pane" class="pane gantt-scroll"></section>
+    </div>
     <section id="pert-pane" class="pane"></section>
   </main>
 

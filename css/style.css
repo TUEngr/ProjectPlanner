@@ -92,7 +92,16 @@ code { background: var(--bg-alt); padding: 0 4px; border-radius: 4px; }
 .tabs button[aria-selected="true"] { background: var(--accent); color: #fff; }
 .row-tools { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 .row-tools .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
-.zoom { margin-left: auto; display: flex; gap: 6px; align-items: center; color: var(--fg-muted); }
+.zoom { display: flex; gap: 6px; align-items: center; color: var(--fg-muted); font-size: 12px; }
+/* Gantt pane wrapper: the zoom control floats over the top-right of the
+   chart header, clear of the vertical scrollbar, and does not scroll. */
+#gantt-wrap { position: relative; display: flex; flex-direction: column; min-height: 0; }
+#gantt-wrap > #gantt-pane { flex: 1; }
+#gantt-wrap > .zoom {
+  position: absolute; top: 7px; right: calc(var(--sbw, 0px) + 8px); z-index: 5;
+  background: var(--bg-head); padding: 2px 2px 2px 8px; border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--border);
+}
 .zoom select { padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 
 .banner {
@@ -105,17 +114,17 @@ body.readonly .edit-only { display: none !important; }
 main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pane { overflow: auto; min-height: 0; }
 main.view-table #table-pane { flex: 1; }
-main.view-table #gantt-pane { display: none; }
+main.view-table #gantt-wrap { display: none; }
 main:not(.view-pert):not(.view-split-pert) #pert-pane { display: none; }
-main.view-split-pert #gantt-pane { display: none; }
+main.view-split-pert #gantt-wrap { display: none; }
 main.view-split-pert #table-pane { flex: 1 1 45%; border-bottom: 3px solid var(--border); }
 main.view-split-pert #pert-pane { flex: 1 1 55%; }
-main.view-pert #table-pane, main.view-pert #gantt-pane { display: none; }
+main.view-pert #table-pane, main.view-pert #gantt-wrap { display: none; }
 main.view-pert #pert-pane { flex: 1; }
 main.view-gantt #table-pane { display: none; }
-main.view-gantt #gantt-pane { flex: 1; }
+main.view-gantt #gantt-wrap { flex: 1; }
 main.view-split #table-pane { flex: 1 1 45%; border-bottom: 3px solid var(--border); }
-main.view-split #gantt-pane { flex: 1 1 55%; }
+main.view-split #gantt-wrap { flex: 1 1 55%; }
 
 /* ---- task table ---- */
 table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
@@ -252,7 +261,6 @@ dialog label input, dialog label textarea, #share-url {
 @media (max-width: 700px) {
   .topbar, .toolbar, .statusbar, .banner { padding-left: 16px; padding-right: 16px; }
   .actions { margin-left: 0; }
-  .zoom { margin-left: 0; }
   main.view-split #table-pane, main.view-split-pert #table-pane { flex-basis: 50%; }
 }
 

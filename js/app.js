@@ -13,6 +13,12 @@ const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
 const VIEWS = ['table', 'gantt', 'pert', 'split', 'split-pert']; // split = Table/Gantt
 const showsPert = () => state.view === 'pert' || state.view === 'split-pert';
+// Which views a plan includes (Settings). Table is always available.
+const ganttOn = () => state.plan.showGantt !== false;
+const pertOn = () => state.plan.showPert !== false;
+const viewAllowed = v => (v !== 'gantt' && v !== 'split' || ganttOn()) && (v !== 'pert' && v !== 'split-pert' || pertOn());
+// Chart for Print / Export PNG: the one on screen, else whichever is included.
+const chartKind = () => showsPert() ? 'pert' : ganttOn() ? 'gantt' : pertOn() ? 'pert' : null;
 
 const state = {
   plan: null,
@@ -152,8 +158,19 @@ function render({ scrollGantt = false } = {}) {
   hideTip(); // its anchor is about to be replaced
   $('#plan-name').textContent = plan.name;
   document.title = `${plan.name} – Project Planner`;
+  // A view this plan excludes falls back to the table (prefs keep the choice
+  // for plans that include it)
+  if (!viewAllowed(state.view)) state.view = 'table';
   $('#main').className = `view-${state.view}`;
-  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === state.view));
+  document.querySelectorAll('.tabs button').forEach(b => {
+    b.setAttribute('aria-selected', b.dataset.view === state.view);
+    b.hidden = !viewAllowed(b.dataset.view);
+  });
+  const kind = chartKind();
+  for (const b of [$('#btn-png'), $('#btn-print')]) {
+    b.disabled = !kind;
+    b.title = kind ? b.dataset.title : 'Turn on Gantt or PERT in Settings to export a chart';
+  }
   $('#zoom').value = state.zoom;
 
   renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly, hidden: state.hidden });
@@ -453,6 +470,8 @@ function showSettings() {
   f.start.value = state.plan.start;
   f.holidays.value = state.plan.holidays.map(h => `${h.date}${h.label ? ' ' + h.label : ''}`).join('\n');
   f.satOff.checked = state.plan.satOff !== false;
+  f.showGantt.checked = ganttOn();
+  f.showPert.checked = pertOn();
   f.sunOff.checked = state.plan.sunOff !== false;
   $('#dlg-settings').showModal();
 }
@@ -476,6 +495,8 @@ function saveSettings() {
     plan.start = start;
     plan.holidays = holidays;
     plan.satOff = f.satOff.checked;
+    plan.showGantt = f.showGantt.checked;
+    plan.showPert = f.showPert.checked;
     plan.sunOff = f.sunOff.checked;
   });
   if (bad.length) toast(`Ignored ${bad.length} line(s) that did not start with a YYYY-MM-DD date.`, 'error');
@@ -497,10 +518,11 @@ async function showShare() {
 }
 
 function printGantt() {
+  if (!chartKind()) return;
   const s = state.sched;
   $('#print-area').innerHTML = `<div class="print-title"><h1>${esc(state.plan.name)}</h1>
     <p>${fmtDate(s.start)} – ${fmtDate(s.finish)} · ${s.workdays} working days · Critical path in red · Printed ${new Date().toLocaleDateString()}</p></div>
-    ${showsPert() ? pertPrintSVG(state.plan, s, state.hidden) : ganttPrintSVG(state.plan, s, state.zoom, state.hidden)}`;
+    ${chartKind() === 'pert' ? pertPrintSVG(state.plan, s, state.hidden) : ganttPrintSVG(state.plan, s, state.zoom, state.hidden)}`;
   document.documentElement.dataset.theme = 'light'; // print in light colors even in dark mode
   window.print();
 }
@@ -526,7 +548,8 @@ function chartExportCSS() {
 const PNG_MAX_PIXELS = 16e6, PNG_MAX_SIDE = 16000;
 
 async function exportPNG() {
-  const pert = showsPert();
+  if (!chartKind()) return;
+  const pert = chartKind() === 'pert';
   const { svg, width, height } = pert
     ? pertStandaloneSVG(state.plan, state.sched, chartExportCSS(), state.hidden)
     : ganttStandaloneSVG(state.plan, state.sched, state.zoom, chartExportCSS(), state.hidden);

@@ -76,7 +76,7 @@ export function blankTask(id) {
 
 export function newPlan(name = 'Untitled project') {
   return {
-    format: FORMAT_VERSION, id: uid(), name, start: nextMonday(), holidays: [], satOff: true, sunOff: true,
+    format: FORMAT_VERSION, id: uid(), name, start: nextMonday(), holidays: [], satOff: true, sunOff: true, showGantt: true, showPert: true,
     tasks: [{ ...blankTask(1), name: 'First task', duration: 5 }],
     nextId: 2,
   };
@@ -120,6 +120,8 @@ export function normalize(obj) {
       : [],
     satOff: obj.satOff !== false, // older plans: weekends off
     sunOff: obj.sunOff !== false,
+    showGantt: obj.showGantt !== false, // views included (Settings); older plans: all
+    showPert: obj.showPert !== false,
     tasks,
     nextId: Math.max(next, Number(obj.nextId) || 0),
     updated: obj.updated,

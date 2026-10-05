@@ -147,6 +147,33 @@
       await click('undo');
       check(cell(16, 'finish').value === fin16, 'undo restores weekends off');
 
+      // ---- Include Gantt / PERT ----
+      const tab = v => d.querySelector(`.tabs button[data-view="${v}"]`);
+      const settings = async (gantt, pertOn) => {
+        d.getElementById('btn-settings').click(); await sleep(40);
+        const f = d.getElementById('settings-form');
+        f.showGantt.checked = gantt; f.showPert.checked = pertOn;
+        f.querySelector('button[value="save"]').click(); await sleep(80);
+      };
+      d.getElementById('btn-settings').click(); await sleep(40);
+      check(d.getElementById('settings-form').showGantt.checked && d.getElementById('settings-form').showPert.checked,
+        'Settings: Include Gantt and Include PERT checked by default');
+      d.getElementById('settings-form').querySelector('button[value="cancel"]').click(); await sleep(40);
+      tab('split').click(); await sleep(60);
+      await settings(false, true);
+      check(tab('gantt').hidden && tab('split').hidden && !tab('pert').hidden && !tab('split-pert').hidden && !tab('table').hidden,
+        'Include Gantt off hides Gantt and Table/Gantt tabs only');
+      check(d.getElementById('main').className === 'view-table', 'view on a hidden tab falls back to Table');
+      await settings(true, false);
+      check(!tab('gantt').hidden && !tab('split').hidden && tab('pert').hidden && tab('split-pert').hidden,
+        'Include PERT off hides PERT and Table/PERT tabs only');
+      await settings(false, false);
+      check(d.getElementById('btn-png').disabled && d.getElementById('btn-print').disabled, 'with no charts, Export PNG and Print are disabled');
+      await click('undo'); await click('undo'); await click('undo');
+      check(['table', 'gantt', 'pert', 'split', 'split-pert'].every(v => !tab(v).hidden) && !d.getElementById('btn-png').disabled,
+        'undo restores all views');
+      tab('split').click(); await sleep(60);
+
       // ---- Reordering ----
       d.querySelector('.tabs button[data-view="split"]').click();
       await sleep(60);

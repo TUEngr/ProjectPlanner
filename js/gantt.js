@@ -8,7 +8,7 @@ import { linkDrives } from './schedule.js';
 
 export const ROW = 26;
 const HEAD = 44;
-const LABEL_W = 280;
+const LABEL_W = 280;       // task-name column; narrower on phones (renderGantt labelW)
 const ZOOM_PX = { day: 26, week: 9, month: 3 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -77,8 +77,9 @@ function header(L, zoom, cal) {
   return out.join('');
 }
 
-function labels(vis, selectedId) {
-  const out = [`<rect class="g-label-bg" x="0" y="0" width="${LABEL_W}" height="${Math.max(vis.length, 1) * ROW}"/>`];
+function labels(vis, selectedId, LW = LABEL_W) {
+  const chars = Math.floor((LW - 48) / 7); // name characters that fit at level 0
+  const out = [`<rect class="g-label-bg" x="0" y="0" width="${LW}" height="${Math.max(vis.length, 1) * ROW}"/>`];
   vis.forEach(({ r, t }, i) => {
     const y = i * ROW;
     const x = 36 + r.level * 14;
@@ -89,10 +90,10 @@ function labels(vis, selectedId) {
     const warn = r.issues.length ? `<tspan class="g-warn" data-tip="${esc(r.issues.join('\n'))}">⚠</tspan> ` : '';
     const pin = r.pinned ? ` <tspan class="g-pin" data-tip="Pinned start date: ${r.start}. The task stays there instead of following its predecessors.">📌</tspan>` : '';
     out.push(`<g class="g-row" data-id="${r.id}">`
-      + `<rect class="g-row-bg${r.id === selectedId ? ' selected' : ''}" x="0" y="${y}" width="${LABEL_W}" height="${ROW}"/>`
+      + `<rect class="g-row-bg${r.id === selectedId ? ' selected' : ''}" x="0" y="${y}" width="${LW}" height="${ROW}"/>`
       + `<text class="g-rownum" x="26" y="${y + 17}" text-anchor="end">${r.row}</text>`
       + twisty
-      + `<text class="${cls}" x="${x + 12}" y="${y + 17}">${warn}${esc(truncate(t.name || '(unnamed)', 32 - r.level * 2))}${pin}</text>`
+      + `<text class="${cls}" x="${x + 12}" y="${y + 17}">${warn}${esc(truncate(t.name || '(unnamed)', chars - r.level * 2))}${pin}</text>`
       + `</g>`);
   });
   return out.join('');
@@ -217,16 +218,17 @@ const DEFS = `<defs>
 </defs>`;
 
 // Render into a container element. Returns nothing; call again on change.
-export function renderGantt(container, plan, sched, { zoom = 'day', selectedId = null, hidden = new Set() } = {}) {
+export function renderGantt(container, plan, sched, { zoom = 'day', selectedId = null, hidden = new Set(), labelW = LABEL_W } = {}) {
+  const LW = labelW;
   const vis = visible(plan, sched, hidden);
   const L = layout(sched, zoom, vis.length);
   const H = L.height;
   container.innerHTML = `
-    <div class="gantt-grid" style="grid-template-columns:${LABEL_W}px ${L.width}px">
-      <div class="g-corner"><svg width="${LABEL_W}" height="${HEAD}"><rect class="g-head-bg" width="${LABEL_W}" height="${HEAD}"/>
+    <div class="gantt-grid" style="grid-template-columns:${LW}px ${L.width}px">
+      <div class="g-corner"><svg width="${LW}" height="${HEAD}"><rect class="g-head-bg" width="${LW}" height="${HEAD}"/>
         <text class="g-head-text" x="10" y="${HEAD - 10}">Task</text></svg></div>
       <div class="g-head"><svg width="${L.width}" height="${HEAD}">${header(L, zoom, sched.cal)}</svg></div>
-      <div class="g-labels"><svg width="${LABEL_W}" height="${H}">${labels(vis, selectedId)}</svg></div>
+      <div class="g-labels"><svg width="${LW}" height="${H}">${labels(vis, selectedId, LW)}</svg></div>
       <div class="g-body"><svg width="${L.width}" height="${H}">${DEFS}${body(sched, vis, hidden, L, selectedId)}</svg></div>
     </div>`;
 }

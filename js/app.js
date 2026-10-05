@@ -11,6 +11,7 @@ import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
+const PHONE = window.matchMedia('(max-width: 700px)'); // matches the CSS phone layout
 const VIEWS = ['table', 'gantt', 'pert', 'split', 'split-pert']; // split = Table/Gantt
 const showsPert = () => state.view === 'pert' || state.view === 'split-pert';
 // Which views a plan includes (Settings). Table is always available.
@@ -176,7 +177,7 @@ function render({ scrollGantt = false } = {}) {
   renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly, hidden: state.hidden });
   const pane = $('#gantt-pane');
   const { scrollLeft, scrollTop } = pane;
-  renderGantt(pane, plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden });
+  renderGantt(pane, plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden, labelW: PHONE.matches ? 150 : 280 });
   // Keep the floating zoom control clear of the pane's vertical scrollbar
   $('#gantt-wrap').style.setProperty('--sbw', `${pane.offsetWidth - pane.clientWidth}px`);
   if (scrollGantt) scrollToDay(pane, state.sched, state.zoom, state.sched.startDay);
@@ -821,6 +822,7 @@ function wireEvents() {
   });
 
   window.addEventListener('hashchange', loadFromHash);
+  PHONE.addEventListener('change', () => render()); // rotating across the breakpoint resizes the Gantt name column
   window.addEventListener('afterprint', () => {
     $('#print-area').innerHTML = '';
     delete document.documentElement.dataset.theme;

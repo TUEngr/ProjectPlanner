@@ -267,8 +267,28 @@ dialog label input, dialog label textarea, #share-url {
 
 @media (max-width: 700px) {
   .topbar, .toolbar, .statusbar, .banner { padding-left: 16px; padding-right: 16px; }
-  .actions { margin-left: 0; }
   main.view-split #table-pane, main.view-split-pert #table-pane { flex-basis: 50%; }
+
+  /* Phones: one line for brand + plan name, then each button group is a
+     single row that scrolls sideways instead of wrapping. The fade at the
+     right edge hints that there is more; end padding lets the last button
+     scroll clear of it. */
+  .topbar { flex-wrap: wrap; row-gap: 6px; padding-top: 6px; padding-bottom: 6px; }
+  .brand { flex: none; }
+  .plan-name { flex: 1 1 0; min-width: 0; max-width: none; text-align: left; padding-left: 4px; }
+  .actions, .toolbar, .statusbar {
+    flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+  .actions::-webkit-scrollbar, .toolbar::-webkit-scrollbar, .statusbar::-webkit-scrollbar { display: none; }
+  .actions { flex: 1 0 100%; margin-left: 0; padding-right: 28px; }
+  .toolbar { padding-right: 44px; gap: 8px; }
+  .toolbar > *, .actions > *, .statusbar > * { flex: none; }
+  .row-tools { flex-wrap: nowrap; }
+  .statusbar { gap: 14px; padding-right: 44px; white-space: nowrap; }
+  .statusbar .save-state { margin-left: 0; }
 }
 
 /* ---- print: Gantt chart only, scaled to page width ---- */

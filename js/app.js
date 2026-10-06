@@ -67,6 +67,16 @@ const LABEL_MIN = 120, LABEL_MAX = 500;
 const clampLabelW = w => Math.round(Math.min(LABEL_MAX, Math.max(LABEL_MIN, w)));
 // Gantt task-name column: fixed narrow on phones, else the user's or default
 const ganttLabelW = () => (PHONE.matches ? 150 : state.ganttLabelW ?? LABEL_W);
+// Table column widths as drawn on screen (Notes includes the spare width it
+// absorbs), falling back to the configured widths if the table is hidden
+function screenColumnWidths() {
+  const out = columnWidths(state.colW);
+  for (const th of document.querySelectorAll('#thead th[data-col]')) {
+    const w = th.getBoundingClientRect().width;
+    if (w > 0) out[th.dataset.col] = w;
+  }
+  return out;
+}
 // Each table column's on-screen width relative to its default, for exports
 function columnScale() {
   const w = columnWidths(state.colW), out = {};
@@ -752,7 +762,7 @@ function printGantt() {
   const s = state.sched;
   $('#print-area').innerHTML = `<div class="print-title"><h1>${esc(state.plan.name)}</h1>
     <p>${fmtDate(s.start)} – ${fmtDate(s.finish)} · ${s.workdays} working days · Critical path in red · Printed ${new Date().toLocaleDateString()}</p></div>
-    ${{ table: () => tablePrintHTML(state.plan, s, state.hidden, columnScale()),
+    ${{ table: () => tablePrintHTML(state.plan, s, state.hidden, screenColumnWidths()),
         pert: () => pertPrintSVG(state.plan, s, state.hidden),
         gantt: () => ganttPrintSVG(state.plan, s, state.zoom, state.hidden, state.ganttLabelW ?? LABEL_W) }[chartKind()]()}`;
   document.documentElement.dataset.theme = 'light'; // print in light colors even in dark mode

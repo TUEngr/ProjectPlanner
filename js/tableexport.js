@@ -49,10 +49,19 @@ function rowsFor(plan, sched, hidden) {
   }));
 }
 
-export function tablePrintHTML(plan, sched, hidden = new Set(), scale = {}) {
+// Text columns share the page width in proportion to their on-screen widths;
+// the fixed-format columns (numbers, dates) always get the width their
+// content needs, so they can't be squeezed until dates run together.
+const TEXT_COLS = new Set(['name', 'preds', 'assignee', 'notes']);
+
+// screen: on-screen widths (px) by column, used for the text columns' shares
+export function tablePrintHTML(plan, sched, hidden = new Set(), screen = {}) {
   const rows = rowsFor(plan, sched, hidden);
-  const ws = widthsFor(scale), total = ws.reduce((a, b) => a + b, 0);
-  const cols = ws.map(w => `<col style="width:${(100 * w / total).toFixed(2)}%">`).join('');
+  const share = k => screen[SCREEN_COL[k] || k] || COLS.find(c => c[0] === k)[2];
+  const textTotal = COLS.filter(c => TEXT_COLS.has(c[0])).reduce((a, c) => a + share(c[0]), 0);
+  const cols = COLS.map(([k]) => (TEXT_COLS.has(k)
+    ? `<col class="tp-text" style="width:${(100 * share(k) / textTotal).toFixed(2)}%">`
+    : '<col class="tp-fit" style="width:1%">')).join('');
   const head = COLS.map(([k, h, , right]) => `<th class="tp-${k}${right ? ' num' : ''}">${h}</th>`).join('');
   const body = rows.map(x => `<tr class="${[x.summary && 'summary', x.critical && 'critical'].filter(Boolean).join(' ')}">`
     + COLS.map(([k, , , right]) => {

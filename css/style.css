@@ -294,8 +294,11 @@ dialog label input, dialog label textarea, #share-url {
 .tx-rule.strong { stroke: var(--border); }
 
 /* Task table for printing (HTML, so it flows across pages) */
-.print-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: fixed; }
-.print-table td, .print-table th { overflow-wrap: anywhere; }
+.print-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: auto; }
+/* Fixed-format columns shrink to their content and never wrap (see tablePrintHTML) */
+.print-table .tp-row, .print-table .tp-duration, .print-table .tp-start, .print-table .tp-finish,
+.print-table .tp-pct, .print-table .tp-float { white-space: nowrap; }
+.print-table td.tp-name, .print-table td.tp-preds, .print-table td.tp-assignee, .print-table td.tp-notes { overflow-wrap: anywhere; }
 .print-table thead { display: table-header-group; } /* repeat the header on each page */
 .print-table tr { break-inside: avoid; }
 .print-table th { text-align: left; font-weight: 600; color: #444; background: #eef0f4; border-bottom: 1px solid #999; padding: 3px 4px; }
@@ -304,7 +307,6 @@ dialog label input, dialog label textarea, #share-url {
 .print-table tr.summary td { font-weight: 700; }
 .print-table tr.critical td { color: #c00; }
 .print-table .tp-row, .print-table .tp-float { color: #666; }
-.print-table .tp-start, .print-table .tp-finish, .print-table .tp-duration, .print-table .tp-pct { white-space: nowrap; }
 
 #print-area { display: none; }
 

@@ -17,9 +17,6 @@
       <button id="btn-settings" class="edit-only" title="Project start date and holidays">Settings</button>
       <button id="btn-export" title="Download this plan as a JSON file">Save file</button>
       <button id="btn-import" class="edit-only" title="Load a plan from a JSON file">Open file</button>
-      <button id="btn-repository" class="edit-only" title="Connect to data/project.json in a local repository">Connect repo</button>
-      <button id="btn-repository-load" class="edit-only" title="Replace this browser copy with the connected repository file">Reload repo</button>
-      <button id="btn-repository-save" class="edit-only" title="Write this plan to the connected repository file">Save to repo</button>
       <button id="btn-share" title="Create a read-only link to this plan">Share link</button>
       <button id="btn-png" title="Download the chart (Gantt, or PERT on the PERT tab) as a PNG image, for reports and slides" data-title="Download the chart (Gantt, or PERT on the PERT tab) as a PNG image, for reports and slides">Export PNG</button>
       <button id="btn-print" title="Print or save the chart (Gantt, or PERT on the PERT tab) as PDF" data-title="Print or save the chart (Gantt, or PERT on the PERT tab) as PDF">Print</button>
@@ -85,7 +82,7 @@
 
   <dialog id="dlg-plans">
     <h2>My plans</h2>
-    <p class="hint">Plans are saved automatically in this browser. Connect a local repository file to load and save the shared plan; commit and push changes with Git.</p>
+    <p class="hint">Plans are saved automatically in this browser only. Use <em>Save file</em> to back up a plan or move it to another computer.</p>
     <ul id="plan-list" class="plan-list"></ul>
     <div class="dlg-buttons">
       <button id="btn-new-plan" class="primary">New plan</button>
@@ -150,7 +147,7 @@
       <li><strong>Gantt chart</strong>: FS arrows run from the end of one bar to the start of the next; SS arrows join the left ends of the bars and FF arrows the right ends. The dark stripe inside a bar is % done, the dashed green line is today, and shaded columns are non-working days. Click a row to select it; double-click a task to edit it in the table (double-clicking a summary collapses it instead).</li>
       <li><strong>Settings</strong> (or click the plan name): rename the plan, set the project start date, list holidays (one <code>YYYY-MM-DD</code> per line with an optional label), choose whether Saturdays and Sundays are non-working days (both are by default; changing these reschedules every task), and choose whether the plan includes the Gantt and PERT views.</li>
       <li><strong>Plans</strong>: keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
-      <li><strong>Saving</strong>: plans save automatically in this browser. Use <em>Save file</em> / <em>Open file</em> for backups. For shared repository work, click <em>Connect repo</em>, select the checkout's <code>data/project.json</code>, edit, then click <em>Save to repo</em>. Review and commit the JSON with Git; the app does not commit or push. Use <em>Reload repo</em> after pulling changes. Clearing browser data deletes local plans.</li>
+      <li><strong>Saving</strong>: plans save automatically in this browser only. Use <em>Save file</em> / <em>Open file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
       <li><strong>Share link</strong>: copies a link containing a read-only snapshot of the plan. Recipients can view it and click <em>Save a copy to my plans</em> to edit their own copy. Later edits are not included; share again to send an update. The plan is packed into the link itself, so nothing is uploaded, but very large plans make long links.</li>
       <li><strong>PERT</strong> tab: a network diagram of the same tasks. Each box shows the row number, name, start and finish, duration, float, and assignee. Each task sits one column to the right of its last predecessor, so columns read left to right as the order of work. Arrows are dependencies (SS and FF are labeled), and the critical path is red. Collapsed groups appear as one dashed box; double-click it to expand. Double-click a task to edit it in the table. Since tasks have a single duration, this is a dependency network, not a three-point (optimistic / likely / pessimistic) PERT estimate.</li>
       <li><strong>Export PNG</strong> downloads the current chart as an image (2× resolution, light colors) for reports and slides: the PERT diagram on the PERT tab, otherwise the Gantt chart at the current zoom (switch to Weeks or Months first for a long project).</li>

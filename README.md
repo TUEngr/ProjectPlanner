@@ -13,13 +13,11 @@ A browser-based project planner with a task table and a Gantt chart. The Gantt c
 - Shows critical path and total float.
 - Has table, Gantt, and split views, with undo/redo.
 
-## Saving, sharing, and repository collaboration
+## Saving and sharing
 
-No application server is involved. Plans are stored in each user's browser (localStorage), and the shared plan can also be tracked as `data/project.json` in this repository.
+No server is involved. Plans are stored in each user's browser (localStorage).
 
 - **Save file / Open file** writes or reads a JSON file, for backups or for moving a plan between machines.
-- **Repository collaboration**: serve the app from `localhost` or HTTPS, click **Connect repo**, and select the checked-out `data/project.json` file. Edit the plan, click **Save to repo**, inspect the JSON diff, then commit, pull/merge, and push with Git. Use **Reload repo** after pulling changes. The browser does not commit or push and never receives Git credentials.
-- The File System Access API is required for direct repository writes. Unsupported browsers can use **Save file** and replace `data/project.json` manually.
 - **Share link** puts a compressed, read-only copy of the plan in the URL fragment (`#share=…`). The fragment is never sent to a server. Recipients can save their own editable copy.
 - **Print** prints the Gantt chart, or saves it as a PDF.
 

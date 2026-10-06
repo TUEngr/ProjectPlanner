@@ -31,9 +31,6 @@ const state = {
   zoom: 'day',
   undo: [],
   redo: [],
-  repositoryHandle: null,
-  repositoryName: '',
-  repositoryPlan: false,
 };
 
 // ---------- preferences (per browser) ----------
@@ -216,7 +213,7 @@ function renderStatus() {
     `<span><b>${leaves.length}</b> tasks, <span class="crit-text">${crit} critical</span></span>`,
     `<span><b>${done}%</b> complete</span>`,
     issues ? `<span class="warn-text">⚠ ${issues} warning${issues > 1 ? 's' : ''}</span>` : '',
-    `<span class="save-state">${state.readOnly ? 'Read-only' : state.repositoryName ? `Repository: ${esc(state.repositoryName)}` : state.repositoryPlan ? 'Loaded from repository' : 'Saved in this browser'}</span>`,
+    `<span class="save-state">${state.readOnly ? 'Read-only' : 'Saved in this browser'}</span>`,
   ].join('');
 }
 
@@ -599,66 +596,19 @@ async function importFile(file) {
   }
 }
 
-async function leaveShared() {
+function leaveShared() {
   history.replaceState(null, '', location.pathname + location.search);
-  openPlan(await loadInitialPlan());
+  openPlan(loadInitialPlan());
 }
 
-async function loadInitialPlan() {
+function loadInitialPlan() {
   const last = store.lastPlanId();
   let plan = (last && store.loadPlan(last)) || store.listPlans().map(p => store.loadPlan(p.id)).find(Boolean);
   if (!plan) {
-    try {
-      plan = await store.loadRepositoryPlan();
-      state.repositoryPlan = true;
-    } catch {
-      plan = samplePlan();
-    }
+    plan = samplePlan();
     store.savePlan(plan);
   }
   return plan;
-}
-
-async function connectRepository() {
-  try {
-    const handle = await store.chooseRepositoryFile();
-    const plan = await store.readRepositoryFile(handle);
-    if (!confirm(`Load “${plan.name}” from ${handle.name}? Any unsaved browser edits to the current plan will be replaced.`)) return;
-    state.repositoryHandle = handle;
-    state.repositoryName = handle.name;
-    state.repositoryPlan = true;
-    store.savePlan(plan);
-    openPlan(plan);
-    toast(`Connected to “${handle.name}”.`);
-  } catch (e) {
-    if (e.name !== 'AbortError') toast(e.message, 'error');
-  }
-}
-
-async function reloadRepository() {
-  if (!state.repositoryHandle) return connectRepository();
-  try {
-    const plan = await store.readRepositoryFile(state.repositoryHandle);
-    if (!confirm(`Replace the current browser copy with “${state.repositoryName}”?`)) return;
-    store.savePlan(plan);
-    state.repositoryPlan = true;
-    openPlan(plan);
-    toast('Reloaded the plan from the repository file.');
-  } catch (e) {
-    toast(`Repository reload failed: ${e.message}`, 'error');
-  }
-}
-
-async function saveRepository() {
-  if (!state.repositoryHandle) return connectRepository();
-  try {
-    await store.writeRepositoryFile(state.repositoryHandle, state.plan);
-    state.repositoryPlan = true;
-    renderStatus();
-    toast(`Saved “${state.plan.name}” to ${state.repositoryName}. Commit and push it with Git.`);
-  } catch (e) {
-    toast(`Repository save failed: ${e.message}`, 'error');
-  }
 }
 
 // ---------- events ----------
@@ -784,9 +734,6 @@ function wireEvents() {
   $('#btn-export').addEventListener('click', () => {
     store.downloadText(`${store.safeFilename(state.plan.name)}.json`, store.planToJSON(state.plan));
   });
-  $('#btn-repository').addEventListener('click', connectRepository);
-  $('#btn-repository-load').addEventListener('click', reloadRepository);
-  $('#btn-repository-save').addEventListener('click', saveRepository);
   $('#btn-import').addEventListener('click', () => $('#file-input').click());
   $('#file-input').addEventListener('change', e => {
     const file = e.target.files[0];
@@ -822,7 +769,7 @@ function wireEvents() {
       const p = store.loadPlan(id);
       if (!confirm(`Delete “${p?.name ?? 'this plan'}” from this browser? This cannot be undone.\n\nTip: use “Save file” first if you want a backup.`)) return;
       store.deletePlan(id);
-      if (!state.readOnly && state.plan.id === id) loadInitialPlan().then(openPlan);
+      if (!state.readOnly && state.plan.id === id) openPlan(loadInitialPlan());
       showPlans();
     }
   });
@@ -903,7 +850,7 @@ async function init() {
   if (!store.storageAvailable()) {
     toast('Browser storage is unavailable (private mode?). Use “Save file” to keep your work.', 'error');
   }
-  if (!(await loadFromHash())) openPlan(await loadInitialPlan());
+  if (!(await loadFromHash())) openPlan(loadInitialPlan());
 }
 
 init();

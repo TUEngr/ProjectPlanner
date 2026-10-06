@@ -12,13 +12,18 @@ import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
-const PHONE = window.matchMedia('(max-width: 700px)'); // matches the CSS phone layout
+const PHONE = window.matchMedia('(max-width: 700px)'); // narrow (portrait phone)
+// Compact layout (drawer instead of toolbars): keep in sync with style.css
+const COMPACT = window.matchMedia('(max-width: 700px), (max-height: 500px)');
+const SHORT = window.matchMedia('(max-height: 500px)'); // landscape phone: no room for split views
 const VIEWS = ['table', 'gantt', 'pert', 'split', 'split-pert']; // split = Table/Gantt
 const showsPert = () => state.view === 'pert' || state.view === 'split-pert';
 // Which views a plan includes (Settings). Table is always available.
 const ganttOn = () => state.plan.showGantt !== false;
 const pertOn = () => state.plan.showPert !== false;
-const viewAllowed = v => (v !== 'gantt' && v !== 'split' || ganttOn()) && (v !== 'pert' && v !== 'split-pert' || pertOn());
+const isSplit = v => v === 'split' || v === 'split-pert';
+const viewAllowed = v => (v !== 'gantt' && v !== 'split' || ganttOn()) && (v !== 'pert' && v !== 'split-pert' || pertOn())
+  && !(SHORT.matches && isSplit(v));
 // Chart for Print / Export PNG: the one on screen, else whichever is included.
 const chartKind = () => showsPert() ? 'pert' : ganttOn() ? 'gantt' : pertOn() ? 'pert' : null;
 
@@ -125,6 +130,98 @@ function wireMenu(button, menu) {
   document.addEventListener('scroll', e => { if (!menu.contains(e.target)) close(); }, true);
 }
 
+// ---------- drawer (compact layout) ----------
+// On phones the toolbars are replaced by a slide-in drawer. Its items either
+// carry data-cmd (handled with the toolbar buttons), data-goview, or
+// data-proxy="#id" to click the matching desktop control, so behaviour is
+// defined once.
+
+function syncDrawerSelection() {
+  const r = state.sched?.byId.get(state.selectedId);
+  const t = state.plan?.tasks.find(x => x.id === state.selectedId);
+  $('#dr-sel').textContent = r ? `· row ${r.row} ${t.name || '(unnamed)'}` : '';
+}
+
+// Mirror the desktop controls' state into the drawer (called from render)
+function syncDrawer() {
+  $('#dr-plan').textContent = state.plan.name;
+  syncDrawerSelection();
+  document.querySelectorAll('#dr-views [data-goview]').forEach(b => {
+    b.hidden = !viewAllowed(b.dataset.goview);
+    b.setAttribute('aria-checked', b.dataset.goview === state.view);
+  });
+  document.querySelectorAll('#drawer [data-proxy]').forEach(b => {
+    const target = $(b.dataset.proxy);
+    if (target) b.disabled = target.disabled;
+  });
+}
+
+function openDrawer() {
+  hideTip();
+  const d = $('#drawer'), s = $('#scrim');
+  d.hidden = s.hidden = false;
+  requestAnimationFrame(() => { d.classList.add('open'); s.classList.add('open'); });
+  $('#btn-drawer').setAttribute('aria-expanded', 'true');
+  d.querySelector('.dr-close').focus();
+}
+function closeDrawer({ refocus = true } = {}) {
+  const d = $('#drawer'), s = $('#scrim');
+  if (d.hidden) return;
+  d.classList.remove('open'); s.classList.remove('open');
+  $('#btn-drawer').setAttribute('aria-expanded', 'false');
+  const done = () => { d.hidden = s.hidden = true; };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) done(); else setTimeout(done, 200);
+  if (refocus) $('#btn-drawer').focus({ preventScroll: true });
+}
+
+function wireDrawer() {
+  const d = $('#drawer');
+  $('#btn-drawer').addEventListener('click', openDrawer);
+  $('#scrim').addEventListener('click', () => closeDrawer());
+  d.querySelector('.dr-close').addEventListener('click', () => closeDrawer());
+  d.addEventListener('click', e => {
+    const b = e.target.closest('button, a');
+    if (!b || b.disabled) return;
+    if (b.dataset.goview) {
+      $(`.tabs button[data-view="${b.dataset.goview}"]`).click();
+      closeDrawer();
+    } else if (b.dataset.proxy) {
+      closeDrawer({ refocus: false }); // dialogs and pickers take focus themselves
+      $(b.dataset.proxy).click();
+    } else if (b.dataset.cmd) {
+      // Edits keep the drawer open in landscape so repeated Indent / Move up
+      // can be watched beside it; in portrait the drawer covers the rows, and
+      // adding a task needs the keyboard on its name.
+      if (PHONE.matches || 'close' in b.dataset) closeDrawer({ refocus: false });
+      else syncDrawerSelection();
+    } else if (b.tagName === 'A') {
+      closeDrawer({ refocus: false });
+    }
+  });
+  d.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); closeDrawer(); return; }
+    if (e.key !== 'Tab') return;
+    // Keep keyboard focus inside the open drawer
+    const f = [...d.querySelectorAll('button, a')].filter(x => !x.disabled && x.offsetParent !== null);
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
+  // Swipe left to close
+  let x0 = null, y0 = 0;
+  d.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  d.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    if (dx < -60 && Math.abs(dy) < Math.abs(dx)) closeDrawer();
+    x0 = null;
+  }, { passive: true });
+  // Leaving the compact layout (rotation, resize) closes it; a short screen
+  // may hide split views, so re-render
+  const relayout = () => { if (!COMPACT.matches) closeDrawer({ refocus: false }); render(); };
+  COMPACT.addEventListener('change', relayout);
+  SHORT.addEventListener('change', relayout);
+}
+
 // ---------- plan lifecycle ----------
 
 function openPlan(plan, { readOnly = false } = {}) {
@@ -200,7 +297,11 @@ function render({ scrollGantt = false } = {}) {
   document.title = `${plan.name} – Project Planner`;
   // A view this plan excludes falls back to the table (prefs keep the choice
   // for plans that include it)
-  if (!viewAllowed(state.view)) state.view = 'table';
+  if (!viewAllowed(state.view)) {
+    // A split view on a short screen becomes its chart alone; anything else, the table
+    const chart = state.view === 'split' ? 'gantt' : state.view === 'split-pert' ? 'pert' : null;
+    state.view = chart && viewAllowed(chart) ? chart : 'table';
+  }
   $('#main').className = `view-${state.view}`;
   document.querySelectorAll('.tabs button').forEach(b => {
     b.setAttribute('aria-selected', b.dataset.view === state.view);
@@ -238,6 +339,7 @@ function render({ scrollGantt = false } = {}) {
   }
   renderStatus();
   updateUndoButtons();
+  syncDrawer();
 }
 
 function renderStatus() {
@@ -257,11 +359,12 @@ function renderStatus() {
     issues ? `<span class="warn-text">⚠ ${issues} warning${issues > 1 ? 's' : ''}</span>` : '',
     `<span class="save-state">${state.readOnly ? 'Read-only' : 'Saved in this browser'}</span>`,
   ].join('');
+  $('#dr-status').innerHTML = $('#status').innerHTML;
 }
 
 function updateUndoButtons() {
-  document.querySelector('[data-cmd="undo"]').disabled = !state.undo.length;
-  document.querySelector('[data-cmd="redo"]').disabled = !state.redo.length;
+  document.querySelectorAll('[data-cmd="undo"]').forEach(b => { b.disabled = !state.undo.length; });
+  document.querySelectorAll('[data-cmd="redo"]').forEach(b => { b.disabled = !state.redo.length; });
 }
 
 function fmtDate(iso) {
@@ -281,6 +384,7 @@ function select(id) {
     .forEach(el => el.classList.add('selected'));
   document.querySelectorAll('#pert-pane .pt-node.selected').forEach(el => el.classList.remove('selected'));
   document.querySelector(`#pert-pane .pt-node[data-id="${id}"]`)?.classList.add('selected');
+  syncDrawerSelection();
 }
 
 // ---------- cell edits ----------
@@ -680,6 +784,7 @@ function loadInitialPlan() {
 
 function wireEvents() {
   wireTips();
+  wireDrawer();
   const tbody = $('#tbody');
 
   tbody.addEventListener('focusin', e => {

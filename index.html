@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Project Planner</title>
   <meta name="description" content="Plan projects with tasks, dependencies, and a Gantt chart with critical path. Plans are stored in your browser.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2' width='8' height='3' fill='%232563eb'/%3E%3Crect x='5' y='7' width='9' height='3' fill='%23dc2626'/%3E%3Crect x='3' y='12' width='6' height='3' fill='%232563eb'/%3E%3C/svg%3E">
@@ -10,8 +10,10 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="btn-drawer" class="hamburger compact-only" aria-label="Menu" aria-controls="drawer" aria-expanded="false">☰</button>
     <div class="brand">Project Planner</div>
     <button id="plan-name" class="plan-name" title="Plan settings">Untitled</button>
+    <span class="ro-chip compact-only readonly-only">Read-only</span>
     <nav class="actions">
       <button id="btn-plans" title="Open, create, or delete plans">Plans</button>
       <button id="btn-settings" class="edit-only" title="Project start date and holidays">Settings</button>
@@ -77,6 +79,74 @@
   <div id="print-area" aria-hidden="true"></div>
   <div id="toast" role="status" aria-live="polite"></div>
   <div id="tip" role="tooltip" hidden></div>
+
+  <!-- Compact layout (phones): everything above the chart lives in this drawer.
+       Most items forward a click to the matching desktop control (data-proxy),
+       so both layouts share one set of handlers. -->
+  <div id="scrim" hidden></div>
+  <aside id="drawer" aria-label="Menu" hidden>
+    <div class="dr-head">
+      <div class="dr-title"><span>Project Planner</span><button class="dr-close" aria-label="Close menu">✕</button></div>
+      <div id="dr-plan" class="dr-plan"></div>
+      <div id="dr-status" class="dr-status"></div>
+      <div class="readonly-only dr-ro">
+        <p>You are viewing a read-only shared copy.</p>
+        <button data-proxy="#btn-save-copy" class="primary">Save a copy to my plans</button>
+        <button data-proxy="#btn-close-shared">Close shared plan</button>
+      </div>
+    </div>
+    <section class="edit-only">
+      <h3>Edit <span id="dr-sel"></span></h3>
+      <div class="dr-grid">
+        <button data-cmd="add" data-close>+ Task</button>
+        <button data-cmd="insert" data-close>Insert</button>
+        <button data-cmd="delete">Delete</button>
+        <button data-cmd="outdent">⇤ Outdent</button>
+        <button data-cmd="indent">Indent ⇥</button>
+        <span></span>
+        <button data-cmd="up">↑ Up</button>
+        <button data-cmd="down">↓ Down</button>
+        <span></span>
+        <button data-cmd="undo">↶ Undo</button>
+        <button data-cmd="redo">↷ Redo</button>
+      </div>
+    </section>
+    <section>
+      <h3>View</h3>
+      <div id="dr-views" class="dr-list" role="radiogroup" aria-label="View">
+        <button role="radio" data-goview="table">Table</button>
+        <button role="radio" data-goview="gantt">Gantt</button>
+        <button role="radio" data-goview="pert">PERT</button>
+        <button role="radio" data-goview="split">Table/Gantt</button>
+        <button role="radio" data-goview="split-pert">Table/PERT</button>
+      </div>
+    </section>
+    <section class="dr-list">
+      <button data-proxy="#btn-plans">Plans…</button>
+      <button data-proxy="#btn-settings" class="edit-only">Settings…</button>
+    </section>
+    <section class="edit-only">
+      <h3>Open</h3>
+      <div class="dr-list">
+        <button data-proxy="#btn-import">JSON file…</button>
+        <button data-proxy="#btn-import-csv">CSV file…</button>
+      </div>
+    </section>
+    <section>
+      <h3>Export</h3>
+      <div class="dr-list">
+        <button data-proxy="#btn-share">Read-only link…</button>
+        <button data-proxy="#btn-export">JSON file</button>
+        <button data-proxy="#btn-csv">CSV file</button>
+        <button data-proxy="#btn-png">PNG image</button>
+        <button data-proxy="#btn-print">Print…</button>
+      </div>
+    </section>
+    <section class="dr-list">
+      <button data-proxy="#btn-help">Help</button>
+      <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">Bugs &amp; feature requests ↗</a>
+    </section>
+  </aside>
   <div id="open-menu" class="menu" role="menu" aria-label="Open" hidden>
     <button role="menuitem" id="btn-import" data-kind="json"><b>JSON file</b><span>A plan saved with Export → JSON file</span></button>
     <button role="menuitem" id="btn-import-csv" data-kind="csv"><b>CSV file</b><span>A task table from Excel, Google Sheets, or Export → CSV</span></button>
@@ -154,6 +224,7 @@
     <h2>Using Project Planner</h2>
     <ul class="help">
       <li><strong>Views</strong>: <em>Table</em>, <em>Gantt</em>, and <em>PERT</em> show one view each. <em>Table/Gantt</em> and <em>Table/PERT</em> show the table above the chart. The selected task is highlighted in every view. A plan can leave out the Gantt or PERT tabs: see <em>Settings</em>.</li>
+      <li><strong>On a phone</strong> the toolbars move into a menu: tap <strong>☰</strong> at the top left. It shows the plan's dates and status, the editing tools (acting on the selected task, named at the top of that section), the views, and Plans, Settings, Open, Export, Print, and Help. Tap outside it, press ✕, or swipe it left to close it. In landscape the split views are left out (there isn't room for two panes), and the editing tools leave the menu open so you can repeat Indent or Move up and watch the result.</li>
       <li><strong>Adding tasks</strong>: <em>+ Task</em> adds a row after the selected task (or as the first subtask of a selected summary). <em>Insert</em> adds a row above it. Pressing Enter in the last row's name also adds a task. <em>Delete</em> removes the selected task; its subtasks move up one level and links to it are removed.</li>
       <li><strong>Keyboard</strong>: Enter / Shift+Enter commits a cell and moves down / up the column. Esc cancels the edit. ⌘/Ctrl+Z undoes; ⌘/Ctrl+Shift+Z or Ctrl+Y redoes.</li>
       <li><strong>Durations</strong> are in working days: Monday to Friday, plus Saturday and/or Sunday if they are unchecked in <em>Settings</em>, minus holidays. Type <code>5</code>, <code>5d</code>, or <code>2w</code>. A duration of <code>0</code> makes a milestone ◆.</li>

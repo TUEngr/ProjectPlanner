@@ -278,6 +278,100 @@
       await sleep(60);
       check(count() === rowsBefore, 'single click on the triangle expands');
 
+      // ---- Export menu ----
+      const menuBtn = d.getElementById('btn-export-menu'), menu = d.getElementById('export-menu');
+      check(!d.querySelector('.actions #btn-png') && !d.querySelector('.actions #btn-share') && !d.querySelector('.actions #btn-export'),
+        'Save file / Share link / Export PNG buttons replaced by the Export menu');
+      menuBtn.click(); await sleep(30);
+      const items = [...menu.querySelectorAll('[role="menuitem"]')].map(b => b.querySelector('b').textContent);
+      check(!menu.hidden && menuBtn.getAttribute('aria-expanded') === 'true' && items.join('|') === 'Read-only link…|JSON file|CSV file|PNG image',
+        `Export menu opens with 4 items (${items.join(', ')})`);
+      check(d.activeElement === menu.querySelector('#btn-share'), 'first item is focused');
+      menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      check(d.activeElement?.id === 'btn-export', 'ArrowDown moves to the next item');
+      menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      check(menu.hidden && d.activeElement === menuBtn, 'Escape closes the menu and returns focus');
+      menuBtn.click(); await sleep(30);
+      d.body.dispatchEvent(new w.PointerEvent('pointerdown', { bubbles: true }));
+      check(menu.hidden, 'clicking outside closes the menu');
+      const grab = ext => new Promise(resolve => {
+        const oc = w.HTMLAnchorElement.prototype.click, ou = w.URL.createObjectURL;
+        let blob = null;
+        w.URL.createObjectURL = b => { blob = b; return ou.call(w.URL, b); };
+        w.HTMLAnchorElement.prototype.click = function () {
+          if (!this.download.endsWith(ext)) return oc.call(this);
+          w.HTMLAnchorElement.prototype.click = oc; w.URL.createObjectURL = ou;
+          resolve({ name: this.download, blob });
+        };
+      });
+      menuBtn.click(); await sleep(30);
+      let got = grab('.csv');
+      menu.querySelector('#btn-csv').click();
+      let dlc = await Promise.race([got, sleep(3000).then(() => null)]);
+      const text = dlc ? await dlc.blob.text() : '';
+      // text() drops the byte-order mark, so check the raw bytes for it
+      const bom = dlc ? [...new Uint8Array(await dlc.blob.slice(0, 3).arrayBuffer())].join() === '239,187,191' : false;
+      check(menu.hidden && dlc && /\.csv$/.test(dlc.name) && text.split('\r\n')[0].startsWith('WBS,Row,') && bom && text.includes('Firmware'),
+        `CSV file downloads the task table (${dlc?.name}, ${text.split('\r\n').length - 2} task rows)`);
+      menuBtn.click(); await sleep(30);
+      got = grab('.json');
+      menu.querySelector('#btn-export').click();
+      dlc = await Promise.race([got, sleep(3000).then(() => null)]);
+      const js = dlc ? JSON.parse(await dlc.blob.text()) : null;
+      check(js && Array.isArray(js.tasks) && js.tasks.some(t => t.name === 'Firmware'), `JSON file downloads the plan (${dlc?.name})`);
+      menuBtn.click(); await sleep(30);
+      menu.querySelector('#btn-share').click(); await sleep(300);
+      check(d.getElementById('dlg-share').open && /#share=/.test(d.getElementById('share-url').value || d.getElementById('share-url').textContent),
+        'Read-only link opens the share dialog with a link');
+      d.getElementById('dlg-share').close();
+
+      // ---- Open menu: CSV / JSON import ----
+      const openBtn = d.getElementById('btn-open-menu'), openMenu = d.getElementById('open-menu');
+      openBtn.click(); await sleep(30);
+      check(!openMenu.hidden && [...openMenu.querySelectorAll('[role="menuitem"] b')].map(b => b.textContent).join('|') === 'JSON file|CSV file',
+        'Open menu offers JSON file and CSV file');
+      d.getElementById('btn-import-csv').click(); await sleep(20);
+      check(openMenu.hidden && d.getElementById('file-input').accept.includes('.csv'), 'CSV item opens a CSV file picker');
+      const feed = async (name, text) => {
+        const dt = new w.DataTransfer();
+        dt.items.add(new w.File([text], name, { type: 'text/csv' }));
+        const inp = d.getElementById('file-input');
+        inp.files = dt.files;
+        inp.dispatchEvent(new w.Event('change', { bubbles: true }));
+        await sleep(150);
+      };
+      const planBefore = d.getElementById('plan-name').textContent;
+      await feed('Garden.csv', 'WBS,Task,Duration,Predecessors\n1,Prep,,\n1.1,Dig beds,3,\n1.2,Plant,2,2SS\n2,Harvest,0,3\n');
+      check(d.getElementById('plan-name').textContent === 'Garden' && count() === 4 && row(1).classList.contains('summary')
+        && cell(3, 'preds').value === '2SS' && cell(4, 'duration').value === '0',
+        `valid CSV opens as a new plan (${d.getElementById('plan-name').textContent}, ${count()} rows)`);
+      await feed('junk.csv', 'Foo,Bar\n1,2\n');
+      const errDlg = d.getElementById('dlg-import-error');
+      check(errDlg.open && /junk\.csv/.test(d.getElementById('import-error-msg').textContent) && /Task/.test(d.getElementById('import-error-msg').textContent),
+        `bad CSV shows an error dialog ("${d.getElementById('import-error-msg').textContent}")`);
+      check(d.getElementById('plan-name').textContent === 'Garden', 'failed import leaves the current plan open');
+      const tpl = new Promise(resolve => {
+        const oc = w.HTMLAnchorElement.prototype.click, ou = w.URL.createObjectURL;
+        let blob = null;
+        w.URL.createObjectURL = b => { blob = b; return ou.call(w.URL, b); };
+        w.HTMLAnchorElement.prototype.click = function () { w.HTMLAnchorElement.prototype.click = oc; w.URL.createObjectURL = ou; resolve({ name: this.download, blob }); };
+      });
+      d.getElementById('btn-csv-template').click();
+      const tdl = await Promise.race([tpl, sleep(3000).then(() => null)]);
+      const ttext = tdl ? await tdl.blob.text() : '';
+      check(tdl && tdl.name === 'project-planner-template.csv' && ttext.startsWith('Row,Outline level,Task') && !errDlg.open,
+        'error dialog downloads the template CSV and closes');
+      await feed('template.csv', ttext);
+      check(d.getElementById('plan-name').textContent === 'template' && count() === 6, 'the template itself imports (6 rows)');
+      // JSON still opens through the same picker
+      await feed('rt.json', JSON.stringify({ name: 'From JSON', start: '2026-10-05', tasks: [{ id: 1, name: 'Only task', duration: 2, preds: [] }] }));
+      check(d.getElementById('plan-name').textContent === 'From JSON' && count() === 1, 'JSON file still opens');
+      // Back to the example plan used by the remaining tests
+      d.getElementById('btn-plans').click(); await sleep(40);
+      const li = [...d.querySelectorAll('#plan-list li')].find(l => l.textContent.includes(planBefore));
+      li?.querySelector('[data-act="open"]').click(); await sleep(100);
+      check(d.getElementById('plan-name').textContent === planBefore, `reopened “${planBefore}” for the remaining tests`);
+
       // ---- PNG export: capture the download instead of saving it ----
       const captured = new Promise(resolve => {
         const origURL = w.URL.createObjectURL, origClick = w.HTMLAnchorElement.prototype.click;

@@ -3,9 +3,11 @@
 // or open tests/index.html in a browser.
 
 import { Calendar, parseISO, toISO } from '../js/calendar.js';
-import { schedule, durationBetween, linkDrives, hiddenIds } from '../js/schedule.js';
+import { schedule, durationBetween, linkDrives, hiddenIds, linksOf } from '../js/schedule.js';
 import { parsePredList, formatLink } from '../js/table.js';
 import { normalize } from '../js/storage.js';
+import { planToCSV, parseCSV, csvToPlan, csvTemplate, csvDate } from '../js/csv.js';
+import { samplePlan } from '../js/sample.js';
 
 const results = [];
 function test(name, fn) {
@@ -233,6 +235,79 @@ test('normalize defaults both weekend days to non-working', () => {
   eq([p.satOff, p.sunOff], [true, true]);
   const q = normalize({ start: '2026-10-05', tasks: [], satOff: false });
   eq([q.satOff, q.sunOff], [false, true]);
+});
+
+test('CSV export: header, WBS numbers, links, quoting', () => {
+  nextId = 700;
+  const ph = T('Phase', 0, [], { level: 0 });
+  const a = T('Design, "rev A"', 3, [], { level: 1, assignee: 'Sam', notes: 'line1\nline2' });
+  const b = T('Build', 2, [{ id: a.id, type: 'SS' }], { level: 1 });
+  const m = T('Done', 0, [b.id], { level: 0 });
+  const p = plan([ph, a, b, m]);
+  const csv = planToCSV(p, schedule(p));
+  eq(csv.charCodeAt(0), 0xFEFF, 'BOM:');
+  const rows = csv.slice(1).split('\r\n');
+  eq(rows[0].split(',').slice(0, 5), ['WBS', 'Row', 'Outline level', 'Task', 'Type']);
+  eq(rows[1].startsWith('1,1,1,Phase,Summary,'), true, `summary row: ${rows[1]}`);
+  eq(rows[2].startsWith('1.1,2,2,"Design, ""rev A""",Task,3,2026-10-05,2026-10-07,,0,Sam,"line1\nline2",'), true, `quoted row: ${rows[2]}`);
+  eq(rows[3].startsWith('1.2,3,2,Build,Task,2,2026-10-05,2026-10-06,2SS,'), true, `SS link by row number: ${rows[3]}`);
+  eq(rows[4].startsWith('2,4,1,Done,Milestone,0,'), true, `milestone row: ${rows[4]}`);
+});
+
+test('parseCSV: quotes, embedded newlines, semicolons, BOM', () => {
+  eq(parseCSV('﻿a,b\r\n"x, ""y""","1\n2"\r\n\r\n'), [['a', 'b'], ['x, "y"', '1\n2']]);
+  eq(parseCSV('Task;Duration\nA;3\n'), [['Task', 'Duration'], ['A', '3']]);
+});
+
+test('CSV round trip: export then import keeps structure, links and schedule', () => {
+  const sp = samplePlan();
+  sp.tasks[6].preds = [{ id: 6, type: 'SS' }];
+  sp.tasks[7].preds = [{ id: 6, type: 'FF' }];
+  sp.tasks[2].manualStart = '2026-10-20';
+  const s1 = schedule(sp);
+  const { plan: raw, warnings } = csvToPlan(planToCSV(sp, s1), { name: 'rt', parsePreds: parsePredList, isoDate: csvDate });
+  const back = normalize(raw);
+  eq(warnings, []);
+  eq(back.tasks.map(t => [t.name, t.level, t.duration, t.pct, t.assignee]), sp.tasks.map(t => [t.name, t.level, t.duration, t.pct, t.assignee]));
+  eq(back.tasks.map(t => t.preds.map(l => `${l.id}${l.type}`).join()), sp.tasks.map(t => linksOf(t).map(l => `${l.id}${l.type}`).join()));
+  eq(back.tasks[2].manualStart, '2026-10-20');
+  const s2 = schedule({ ...back, start: sp.start });
+  eq(s2.rows.map(r => [r.start, r.finish, r.critical]), s1.rows.map(r => [r.start, r.finish, r.critical]));
+});
+
+test('CSV import: hand-made sheet with WBS levels, US dates, no Row column', () => {
+  const csv = 'WBS,Name,Days,Depends on,Start\n1,Phase,,,\n1.1,Dig,3,,10/5/2026\n1.2,Pour,2,2,\n2,Done,0,3,\n';
+  const { plan: raw, warnings } = csvToPlan(csv, { parsePreds: parsePredList, isoDate: csvDate });
+  const p = normalize(raw);
+  eq(warnings, []);
+  eq(p.start, '2026-10-05');
+  eq(p.tasks.map(t => [t.name, t.level, t.duration]), [['Phase', 0, 1], ['Dig', 1, 3], ['Pour', 1, 2], ['Done', 0, 0]]);
+  eq(p.tasks[2].preds, [{ id: 2, type: 'FS' }]);
+});
+
+test('CSV import: bad references warn; missing Task column throws', () => {
+  const { warnings } = csvToPlan('Task,Predecessors\nA,9\nB,1\n', { parsePreds: parsePredList, isoDate: csvDate });
+  eq(warnings.length, 1);
+  let msg = '';
+  try { csvToPlan('Foo,Bar\n1,2\n', { parsePreds: parsePredList, isoDate: csvDate }); } catch (e) { msg = e.message; }
+  eq(/Task/.test(msg), true, `error: ${msg}`);
+  try { csvToPlan('Task\n', { parsePreds: parsePredList, isoDate: csvDate }); msg = ''; } catch (e) { msg = e.message; }
+  eq(/at least one task/.test(msg), true, `error: ${msg}`);
+});
+
+test('CSV template imports cleanly', () => {
+  const { plan: raw, warnings } = csvToPlan(csvTemplate(), { parsePreds: parsePredList, isoDate: csvDate });
+  const p = normalize(raw);
+  eq(warnings, []);
+  eq(p.tasks.map(t => t.name), ['Phase 1', 'Design', 'Build', 'Write test plan', 'Design review', 'Final demo']);
+  eq(p.tasks[3].preds, [{ id: 3, type: 'SS' }]);
+  eq(p.tasks[4].duration, 0);
+  const s = schedule(p);
+  eq(s.rows[0].summary && !s.rows[4].summary, true);
+});
+
+test('csvDate accepts ISO and US dates only', () => {
+  eq(['2026-10-05', '10/5/2026', '1/2/27', '13/1/2026', '2026/10/05', ''].map(csvDate), ['2026-10-05', '2026-10-05', '2027-01-02', null, null, null]);
 });
 
 test('durationBetween counts working days inclusive', () => {

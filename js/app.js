@@ -7,6 +7,7 @@ import { renderTable, renderTableHead, parseDuration, parsePredList } from './ta
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
+import { planToCSV, csvToPlan, csvTemplate, csvDate } from './csv.js';
 import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 
 const $ = sel => document.querySelector(sel);
@@ -86,6 +87,44 @@ function wireTips() {
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); });
 }
 
+// ---------- drop-down menu ----------
+// The menu is positioned under its button but lives at the document level,
+// so the header's sideways scrolling on phones can't clip it.
+
+function wireMenu(button, menu) {
+  const items = () => [...menu.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+  const close = (refocus = false) => {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    if (refocus) button.focus();
+  };
+  const open = () => {
+    hideTip();
+    menu.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    const r = button.getBoundingClientRect(), m = menu.getBoundingClientRect();
+    menu.style.top = `${r.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, Math.min(r.right - m.width, window.innerWidth - m.width - 8))}px`;
+    items()[0]?.focus();
+  };
+  button.addEventListener('click', () => (menu.hidden ? open() : close()));
+  // Choosing an item closes the menu; the item's own handler does the work
+  menu.addEventListener('click', e => { if (e.target.closest('[role="menuitem"]')) close(); });
+  menu.addEventListener('keydown', e => {
+    const list = items(), k = list.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); list[(k + 1) % list.length]?.focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); list[(k - 1 + list.length) % list.length]?.focus(); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(true); }
+    else if (e.key === 'Tab') close();
+  });
+  document.addEventListener('pointerdown', e => {
+    if (!menu.contains(e.target) && !button.contains(e.target)) close();
+  });
+  window.addEventListener('resize', () => close());
+  document.addEventListener('scroll', e => { if (!menu.contains(e.target)) close(); }, true);
+}
+
 // ---------- plan lifecycle ----------
 
 function openPlan(plan, { readOnly = false } = {}) {
@@ -101,7 +140,7 @@ function openPlan(plan, { readOnly = false } = {}) {
 
 function persist() {
   if (state.readOnly) return;
-  if (!store.savePlan(state.plan)) toast('Could not save to browser storage. Use “Save file” to keep your work.', 'error');
+  if (!store.savePlan(state.plan)) toast('Could not save to browser storage. Use Export → JSON file to keep your work.', 'error');
 }
 
 // Wrap every edit: snapshot for undo, mutate, save, re-render.
@@ -172,6 +211,9 @@ function render({ scrollGantt = false } = {}) {
     b.disabled = !kind;
     b.title = kind ? b.dataset.title : 'Turn on Gantt or PERT in Settings to export a chart';
   }
+  $('#png-kind').textContent = kind
+    ? `The ${kind === 'pert' ? 'PERT diagram' : 'Gantt chart'}${kind === 'gantt' ? ' at the current zoom' : ''}, for reports and slides`
+    : 'No chart: turn on Gantt or PERT in Settings';
   $('#zoom').value = state.zoom;
 
   renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly, hidden: state.hidden });
@@ -504,7 +546,7 @@ function saveSettings() {
 }
 
 async function showShare() {
-  if (!('CompressionStream' in window)) return toast('This browser cannot create share links. Use “Save file” instead.', 'error');
+  if (!('CompressionStream' in window)) return toast('This browser cannot create share links. Use Export → JSON file instead.', 'error');
   try {
     const frag = await store.encodeShare(state.plan);
     const url = `${location.origin}${location.pathname}#${frag}`;
@@ -580,8 +622,12 @@ async function exportPNG() {
 }
 
 async function importFile(file) {
+  const text = await file.text();
+  // Go by content rather than the menu item, so a mislabelled file still opens
+  const isJSON = /^\s*\{/.test(text.replace(/^\uFEFF/, ''));
+  if (!isJSON) return importCSV(file, text);
   try {
-    const plan = store.normalize(JSON.parse(await file.text()));
+    const plan = store.normalize(JSON.parse(text));
     if (store.listPlans().some(p => p.id === plan.id)) {
       if (!confirm(`A plan with this ID (“${store.loadPlan(plan.id)?.name}”) already exists in this browser.\n\nOK = replace it with the file\nCancel = keep both (import as a copy)`)) {
         plan.id = store.uid();
@@ -593,6 +639,25 @@ async function importFile(file) {
     toast(`Opened “${plan.name}”.`);
   } catch (e) {
     toast(e instanceof SyntaxError ? 'That file is not valid JSON.' : e.message, 'error');
+  }
+}
+
+// A CSV becomes a new plan (it has no plan id, holidays, or settings).
+function importCSV(file, text) {
+  try {
+    const name = file.name.replace(/\.[^.]+$/, '') || 'Imported plan';
+    const { plan: raw, warnings } = csvToPlan(text, { name, parsePreds: parsePredList, isoDate: csvDate });
+    const plan = store.normalize(raw);
+    store.savePlan(plan);
+    openPlan(plan);
+    const n = plan.tasks.length;
+    toast(`Imported ${n} task${n === 1 ? '' : 's'} from “${file.name}” as a new plan.`
+      + (warnings.length ? ` Note: ${warnings.join('; ')}.` : '')
+      + ' Holidays and weekend settings are not in a CSV; check Settings.', warnings.length ? 'error' : '');
+  } catch (e) {
+    // Explain, and offer a template in the layout the importer reads
+    $('#import-error-msg').textContent = `“${file.name}”: ${e.message}`;
+    $('#dlg-import-error').showModal();
   }
 }
 
@@ -734,13 +799,28 @@ function wireEvents() {
   $('#btn-export').addEventListener('click', () => {
     store.downloadText(`${store.safeFilename(state.plan.name)}.json`, store.planToJSON(state.plan));
   });
-  $('#btn-import').addEventListener('click', () => $('#file-input').click());
+  // Open menu: each item sets the file picker's filter, then opens it
+  for (const b of [$('#btn-import'), $('#btn-import-csv')]) {
+    b.addEventListener('click', () => {
+      $('#file-input').accept = b.dataset.kind === 'csv' ? '.csv,text/csv' : '.json,application/json';
+      $('#file-input').click();
+    });
+  }
+  wireMenu($('#btn-open-menu'), $('#open-menu'));
+  $('#btn-csv-template').addEventListener('click', () => {
+    store.downloadText('project-planner-template.csv', csvTemplate(), 'text/csv;charset=utf-8');
+    $('#dlg-import-error').close();
+  });
   $('#file-input').addEventListener('change', e => {
     const file = e.target.files[0];
     e.target.value = '';
     if (file) importFile(file);
   });
   $('#btn-share').addEventListener('click', showShare);
+  $('#btn-csv').addEventListener('click', () => {
+    store.downloadText(`${store.safeFilename(state.plan.name)}.csv`, planToCSV(state.plan, state.sched), 'text/csv;charset=utf-8');
+  });
+  wireMenu($('#btn-export-menu'), $('#export-menu'));
   $('#btn-print').addEventListener('click', printGantt);
   $('#btn-png').addEventListener('click', exportPNG);
   $('#btn-help').addEventListener('click', () => {
@@ -767,7 +847,7 @@ function wireEvents() {
       $('#dlg-plans').close();
     } else if (act === 'delete') {
       const p = store.loadPlan(id);
-      if (!confirm(`Delete “${p?.name ?? 'this plan'}” from this browser? This cannot be undone.\n\nTip: use “Save file” first if you want a backup.`)) return;
+      if (!confirm(`Delete “${p?.name ?? 'this plan'}” from this browser? This cannot be undone.\n\nTip: use Export → JSON file first if you want a backup.`)) return;
       store.deletePlan(id);
       if (!state.readOnly && state.plan.id === id) openPlan(loadInitialPlan());
       showPlans();
@@ -848,7 +928,7 @@ async function init() {
   renderTableHead($('#thead'));
   wireEvents();
   if (!store.storageAvailable()) {
-    toast('Browser storage is unavailable (private mode?). Use “Save file” to keep your work.', 'error');
+    toast('Browser storage is unavailable (private mode?). Use Export → JSON file to keep your work.', 'error');
   }
   if (!(await loadFromHash())) openPlan(loadInitialPlan());
 }

@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "id": "shared-project-plan",
+  "name": "Shared project plan",
+  "start": "2026-10-12",
+  "holidays": [],
+  "satOff": true,
+  "sunOff": true,
+  "showGantt": true,
+  "showPert": true,
+  "tasks": [
+    {
+      "id": 1,
+      "name": "First task",
+      "level": 0,
+      "duration": 5,
+      "preds": [],
+      "manualStart": null,
+      "pct": 0,
+      "assignee": "",
+      "notes": ""
+    }
+  ],
+  "nextId": 2
+}

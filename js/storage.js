@@ -162,6 +162,40 @@ export function safeFilename(name) {
   return (name || 'plan').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'plan';
 }
 
+// The repository file is a shared working copy. Git remains responsible for
+// review, merging, committing, and pushing changes.
+export const repositorySupported = typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function';
+
+export async function loadRepositoryPlan(url = 'data/project.json') {
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Could not load the repository plan (${response.status}).`);
+  return normalize(await response.json());
+}
+
+export async function chooseRepositoryFile() {
+  if (!repositorySupported) throw new Error('This browser cannot connect directly to a repository file. Use Save file and Open file instead.');
+  const [handle] = await window.showOpenFilePicker({
+    multiple: false,
+    types: [{ description: 'Project Planner JSON', accept: { 'application/json': ['.json'] } }],
+  });
+  return handle;
+}
+
+export async function readRepositoryFile(handle) {
+  const file = await handle.getFile();
+  return normalize(JSON.parse(await file.text()));
+}
+
+export async function writeRepositoryFile(handle, plan) {
+  if (!handle?.createWritable) throw new Error('The selected file cannot be written by this browser.');
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(planToJSON(plan));
+  } finally {
+    await writable.close();
+  }
+}
+
 // ---- Share links ----
 
 const SHARE_PREFIX = 'share=';

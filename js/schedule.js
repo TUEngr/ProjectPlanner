@@ -4,7 +4,7 @@
 //   { name, start: 'YYYY-MM-DD', holidays: [{date, label}], satOff, sunOff, tasks: [Task] }
 //   satOff / sunOff: every Saturday / Sunday is non-working (default true)
 //   nearCritical: tasks with 0 < float <= this many working days are marked
-//     near-critical (default 5; 0 turns it off)
+//     near-critical (default NEAR_DEFAULT; 0 turns it off)
 //   Task = { id, name, level, duration, preds: [Link], manualStart: 'YYYY-MM-DD'|null,
 //            pct, assignee, notes }
 //   Link = { id, type: 'FS'|'SS'|'FF' } (a bare id is accepted as FS)
@@ -198,9 +198,10 @@ export function hiddenIds(plan, sched) {
 }
 
 // Near-critical threshold in working days (0 = off)
+export const NEAR_DEFAULT = 2;
 export function nearCriticalDays(plan) {
-  const n = plan.nearCritical === undefined || plan.nearCritical === null ? 5 : Number(plan.nearCritical);
-  return Number.isFinite(n) ? Math.max(0, Math.min(999, Math.round(n))) : 5;
+  const n = plan.nearCritical === undefined || plan.nearCritical === null ? NEAR_DEFAULT : Number(plan.nearCritical);
+  return Number.isFinite(n) ? Math.max(0, Math.min(999, Math.round(n))) : NEAR_DEFAULT;
 }
 
 const CONFLICT = {

@@ -310,10 +310,14 @@ test('csvDate accepts ISO and US dates only', () => {
   eq(['2026-10-05', '10/5/2026', '1/2/27', '13/1/2026', '2026/10/05', ''].map(csvDate), ['2026-10-05', '2026-10-05', '2027-01-02', null, null, null]);
 });
 
-test('near-critical: float within the threshold, default 5, 0 = off', () => {
-  // a(5) -> c; b(2) -> c: b has 3 days float
-  const run = extra => { nextId = 800; const a = T('a', 5), b = T('b', 2), c = T('c', 1, [a.id, b.id]); const s = schedule(plan([a, b, c], extra)); return s.byId.get(b.id); };
-  eq([run({}).near, run({}).critical], [true, false], 'default 5:');
+test('near-critical: float within the threshold, default 2, 0 = off', () => {
+  // a(5) -> c; b(2) -> c: b has 3 days float; d(4) -> c: d has 1 day float
+  const run = (extra, task = 'b') => {
+    nextId = 800;
+    const a = T('a', 5), b = T('b', 2), d = T('d', 4), c = T('c', 1, [a.id, b.id, d.id]);
+    return schedule(plan([a, b, d, c], extra)).byId.get(task === 'b' ? b.id : d.id);
+  };
+  eq([run({}).near, run({}, 'd').near, run({}).critical], [false, true, false], 'default 2 (float 3 no, float 1 yes):');
   eq(run({ nearCritical: 3 }).near, true, 'threshold equal to float:');
   eq(run({ nearCritical: 2 }).near, false, 'threshold below float:');
   eq(run({ nearCritical: 0 }).near, false, 'off:');
@@ -331,11 +335,12 @@ test('near-critical: a pinned finish leaves the chain before it with slack', () 
   eq([at().get(a.id).near, at(5).get(a.id).near, at(6).get(a.id).near, at(6).get(b.id).near], [false, false, true, true]);
 });
 
-test('normalize: nearCritical defaults to 5 and is clamped', () => {
-  eq(normalize({ start: '2026-10-05', tasks: [] }).nearCritical, 5);
+test('normalize: nearCritical defaults to 2 and is clamped', () => {
+  eq(normalize({ start: '2026-10-05', tasks: [] }).nearCritical, 2);
   eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: 0 }).nearCritical, 0);
   eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: -3 }).nearCritical, 0);
-  eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: 'x' }).nearCritical, 5);
+  eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: 'x' }).nearCritical, 2);
+  eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: 5 }).nearCritical, 5, 'an existing setting is kept:');
 });
 
 test('durationBetween counts working days inclusive', () => {

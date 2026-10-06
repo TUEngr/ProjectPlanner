@@ -18,9 +18,12 @@ const crit = sched.rows.filter(r => !r.summary && r.critical).map(r => r.row);
 results.push([crit.join() === '2,3,4,7,8,9,11,14,15,16', `sample critical path rows: ${crit.join(', ')}`]);
 results.push([(ganttPrintSVG(plan, sched, 'day').match(/class="g-link/g) || []).length === 15, 'sample has 15 dependency arrows']);
 {
-  const near = sched.rows.filter(r => r.near).map(r => r.row).join();
-  const svg = ganttPrintSVG(plan, sched, 'day');
-  results.push([near === '6,12' && (svg.match(/g-bar near/g) || []).length === 2, `sample near-critical rows (float ≤ 5): ${near}; drawn orange`]);
+  // Sample floats are 4, 5 and 9: none near-critical at the default 2; two at 5
+  results.push([sched.rows.every(r => !r.near), 'sample has no near-critical tasks at the default threshold (2)']);
+  const p5 = { ...plan, nearCritical: 5 }, s5 = schedule(p5);
+  const near = s5.rows.filter(r => r.near).map(r => r.row).join();
+  const svg = ganttPrintSVG(p5, s5, 'day');
+  results.push([near === '6,12' && (svg.match(/g-bar near/g) || []).length === 2, `threshold 5: near-critical rows ${near}; drawn orange`]);
 }
 
 // PERT: 13 task nodes; column = dependency depth

@@ -182,16 +182,18 @@
         return tr.classList.contains('near') === (f > 0 && f <= n);
       });
       const nearCount = () => d.querySelectorAll('#tbody tr.near').length;
-      check(nearMatches(5) && nearCount() > 0 && new RegExp(`${nearCount()} near-critical`).test(d.getElementById('status').textContent),
-        `rows with float 1–5 are near-critical (${nearCount()}) and counted in the status bar`);
+      const statusNear = () => (/(\d+) near-critical/.exec(d.getElementById('status').textContent) || [0, '0'])[1];
+      check(nearMatches(2) && statusNear() === String(nearCount()),
+        `rows with float 1–2 are near-critical (${nearCount()}) and the status bar agrees (${statusNear()})`);
       d.getElementById('btn-settings').click(); await sleep(40);
-      check(d.getElementById('settings-form').nearCritical.value === '5', 'Settings shows the near-critical threshold (5)');
+      check(d.getElementById('settings-form').nearCritical.value === '2', 'Settings shows the default near-critical threshold (2)');
       d.getElementById('settings-form').nearCritical.value = '20';
       d.getElementById('settings-form').querySelector('button[value="save"]').click(); await sleep(80);
       check(nearMatches(20) && d.querySelectorAll('#gantt-pane .g-bar.near').length + d.querySelectorAll('#gantt-pane .g-milestone.near').length === nearCount(),
         `raising it to 20 marks every task with float 1–20 (${nearCount()}), and the Gantt matches`);
+      check(nearCount() > 0 && statusNear() === String(nearCount()), 'status bar counts them');
       await click('undo');
-      check(nearMatches(5), 'undo restores the threshold');
+      check(nearMatches(2), 'undo restores the threshold');
 
       // ---- Reordering ----
       d.querySelector('.tabs button[data-view="split"]').click();

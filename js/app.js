@@ -24,7 +24,7 @@ const pertOn = () => state.plan.showPert !== false;
 const isSplit = v => v === 'split' || v === 'split-pert';
 const viewAllowed = v => (v !== 'gantt' && v !== 'split' || ganttOn()) && (v !== 'pert' && v !== 'split-pert' || pertOn())
   && !(SHORT.matches && isSplit(v));
-// Chart for Print / Export PNG: the one on screen, else whichever is included.
+// Chart for Print / Export → PNG image: the one on screen, else whichever is included.
 const chartKind = () => showsPert() ? 'pert' : ganttOn() ? 'gantt' : pertOn() ? 'pert' : null;
 
 const state = {
@@ -314,6 +314,9 @@ function render({ scrollGantt = false } = {}) {
   }
   $('#png-kind').textContent = kind
     ? `The ${kind === 'pert' ? 'PERT diagram' : 'Gantt chart'}${kind === 'gantt' ? ' at the current zoom' : ''}, for reports and slides`
+    : 'No chart: turn on Gantt or PERT in Settings';
+  $('#print-kind').textContent = kind
+    ? `The ${kind === 'pert' ? 'PERT diagram' : 'Gantt chart'}, or save it as a PDF`
     : 'No chart: turn on Gantt or PERT in Settings';
   $('#zoom').value = state.zoom;
 

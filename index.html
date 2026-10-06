@@ -19,7 +19,6 @@
       <button id="btn-settings" class="edit-only" title="Project start date and holidays">Settings</button>
       <button id="btn-open-menu" class="edit-only" aria-haspopup="menu" aria-expanded="false" aria-controls="open-menu" title="Load a plan from a file">Open ▾</button>
       <button id="btn-export-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu" title="Share or download this plan">Export ▾</button>
-      <button id="btn-print" title="Print or save the chart (Gantt, or PERT on the PERT tab) as PDF" data-title="Print or save the chart (Gantt, or PERT on the PERT tab) as PDF">Print</button>
       <button id="btn-help" title="How to use Project Planner">Help</button>
     </nav>
     <input id="file-input" type="file" hidden>
@@ -156,6 +155,7 @@
     <button role="menuitem" id="btn-export"><b>JSON file</b><span>The full plan; reopen it with Open → JSON file</span></button>
     <button role="menuitem" id="btn-csv"><b>CSV file</b><span>The task table, for Excel or Google Sheets</span></button>
     <button role="menuitem" id="btn-png" data-title=""><b>PNG image</b><span id="png-kind">The current chart, for reports and slides</span></button>
+    <button role="menuitem" id="btn-print" data-title=""><b>Print…</b><span id="print-kind">The current chart, or save it as a PDF</span></button>
   </div>
 
   <dialog id="dlg-plans">
@@ -231,7 +231,7 @@
       <li><strong>Predecessors</strong>: list row numbers, e.g. <code>2, 5SS, 7FF</code>. A bare number is finish-to-start (this task starts after row 2 finishes). <code>SS</code> is start-to-start (starts no earlier than row 5 starts). <code>FF</code> is finish-to-finish (finishes no earlier than row 7 finishes). With several predecessors, the latest constraint wins. Summary tasks can't have predecessors or be one; link their subtasks instead.</li>
       <li><strong>Dates</strong>: start and finish are calculated. Typing a <em>Start</em> date pins the task there 📌; click the pin to release it. Typing a <em>Finish</em> date changes the duration.</li>
       <li><strong>⚠ warnings</strong> mark problems: a pinned date that breaks a link (it starts before an FS predecessor finishes, starts before an SS predecessor starts, or finishes before an FF predecessor finishes), a circular dependency, or a link to a summary task. Hover the ⚠ for details.</li>
-      <li><strong>Summary tasks</strong>: select a task and click <em>Indent</em> to make it a subtask of the row above; <em>Outdent</em> reverses it. Summary rows roll up dates and progress from their subtasks. Double-click a summary row (in the table or the Gantt chart), or click its ▾ / ▸, to collapse or expand it. Each group remembers its own state, so expanding a phase restores its subgroups as you left them. Links to hidden tasks are drawn to the collapsed group's bar, and Print and Export PNG show only what is expanded.</li>
+      <li><strong>Summary tasks</strong>: select a task and click <em>Indent</em> to make it a subtask of the row above; <em>Outdent</em> reverses it. Summary rows roll up dates and progress from their subtasks. Double-click a summary row (in the table or the Gantt chart), or click its ▾ / ▸, to collapse or expand it. Each group remembers its own state, so expanding a phase restores its subgroups as you left them. Links to hidden tasks are drawn to the collapsed group's bar, and Export → PNG image and Export → Print show only what is expanded.</li>
       <li><strong>Reordering</strong>: drag a row in the Gantt chart, or drag the row number (⠿) in the table, up or down. A summary task moves with its subtasks. The ↑ / ↓ buttons move the selected task past its neighbor. Links follow the tasks, so predecessor row numbers update automatically.</li>
       <li><strong>Critical path</strong> (red) is the chain of tasks with zero float: any slip in them delays the finish. <em>Float</em> is how many working days a task can slip without delaying the project. Links that drive the critical path are drawn in red.</li>
       <li><strong>Gantt chart</strong>: FS arrows run from the end of one bar to the start of the next; SS arrows join the left ends of the bars and FF arrows the right ends. The dark stripe inside a bar is % done, the dashed green line is today, and shaded columns are non-working days. Click a row to select it; double-click a task to edit it in the table (double-clicking a summary collapses it instead).</li>
@@ -245,11 +245,11 @@
           <li><em>JSON file</em> downloads the complete plan (tasks, links, settings) for backups or another computer; load it with <em>Open → JSON file</em>.</li>
           <li><em>CSV file</em> downloads the task table for Excel or Google Sheets: WBS number, row, task, type, duration, start, finish, predecessors, % complete, assignee, notes, float, critical, and pinned start. It includes tasks inside collapsed groups. It can be opened again with <em>Open → CSV file</em>, but only the task table comes back (not holidays or settings).</li>
           <li><em>PNG image</em> downloads the current chart (2× resolution, light colors) for reports and slides: the PERT diagram on the PERT tabs, otherwise the Gantt chart at the current zoom (switch to Weeks or Months first for a long project). Collapsed groups stay collapsed in the image.</li>
+          <li><em>Print…</em> prints the same chart as <em>PNG image</em>, landscape and scaled to the page width; choose “Save as PDF” in the print dialog for a PDF. Unavailable when the plan includes neither Gantt nor PERT.</li>
         </ul>
       </li>
       <li><strong>PERT</strong> tab: a network diagram of the same tasks. Each box shows the row number, name, start and finish, duration, float, and assignee. Each task sits one column to the right of its last predecessor, so columns read left to right as the order of work. Arrows are dependencies (SS and FF are labeled), and the critical path is red. Collapsed groups appear as one dashed box; double-click it to expand. Double-click a task to edit it in the table. Since tasks have a single duration, this is a dependency network, not a three-point (optimistic / likely / pessimistic) PERT estimate.</li>
 
-      <li><strong>Printing</strong>: <em>Print</em> prints the current chart (the PERT diagram on the PERT tab, otherwise the Gantt chart at the current zoom); choose “Save as PDF” in the print dialog for a PDF.</li>
     </ul>
     <h3>Bugs and feature requests</h3>
     <p>Report problems and suggest features on the <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">GitHub issues page</a> (a free GitHub account is needed). Search the existing issues first; if yours is already there, add a comment or a 👍 instead of opening a new one. Otherwise click <em>New issue</em> and include:</p>

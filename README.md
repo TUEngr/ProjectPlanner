@@ -23,7 +23,7 @@ No server is involved. Plans are stored in each user's browser (localStorage).
 - **Export → Read-only link** puts a compressed, read-only copy of the plan in the URL fragment (`#share=…`). The fragment is never sent to a server. Recipients can save their own editable copy.
 - **Export → CSV file** downloads the task table (WBS, dates, links, float, critical) for spreadsheets; it can be re-imported.
 - **Export → PNG image** downloads the current Gantt chart or PERT diagram for reports.
-- **Print** prints the current chart (Gantt or PERT), or saves it as a PDF.
+- **Export → Print** prints the current chart (Gantt or PERT), or saves it as a PDF.
 
 ## Development
 

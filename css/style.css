@@ -278,6 +278,29 @@ dialog label input, dialog label textarea, #share-url {
 .menu button b { font-weight: 600; }
 .menu button span { font-size: 12px; color: var(--fg-muted); }
 
+/* Task table for PNG export (SVG) */
+.tx-head-bg { fill: var(--bg-head); }
+.tx-head { fill: var(--fg-muted); font-size: 12px; font-weight: 600; font-family: var(--font); }
+.tx-cell { fill: var(--fg); font-size: 12.5px; font-family: var(--font); }
+.tx-cell.summary { font-weight: 700; }
+.tx-cell.critical { fill: var(--crit); }
+.tx-cell.muted { fill: var(--fg-muted); }
+.tx-odd { fill: var(--bg-alt); }
+.tx-rule { stroke: var(--grid); stroke-width: 1; }
+.tx-rule.strong { stroke: var(--border); }
+
+/* Task table for printing (HTML, so it flows across pages) */
+.print-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+.print-table thead { display: table-header-group; } /* repeat the header on each page */
+.print-table tr { break-inside: avoid; }
+.print-table th { text-align: left; font-weight: 600; color: #444; background: #eef0f4; border-bottom: 1px solid #999; padding: 3px 4px; }
+.print-table td { border-bottom: 1px solid #ddd; padding: 2px 4px; vertical-align: top; }
+.print-table .num { text-align: right; }
+.print-table tr.summary td { font-weight: 700; }
+.print-table tr.critical td { color: #c00; }
+.print-table .tp-row, .print-table .tp-float { color: #666; }
+.print-table .tp-start, .print-table .tp-finish, .print-table .tp-duration, .print-table .tp-pct { white-space: nowrap; }
+
 #print-area { display: none; }
 
 /* ---- Compact layout: phones in portrait (narrow) or landscape (short) ----

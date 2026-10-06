@@ -8,6 +8,7 @@ import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
 import { planToCSV, csvToPlan, csvTemplate, csvDate } from './csv.js';
+import { tablePrintHTML, tableStandaloneSVG } from './tableexport.js';
 import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 
 const $ = sel => document.querySelector(sel);
@@ -24,8 +25,11 @@ const pertOn = () => state.plan.showPert !== false;
 const isSplit = v => v === 'split' || v === 'split-pert';
 const viewAllowed = v => (v !== 'gantt' && v !== 'split' || ganttOn()) && (v !== 'pert' && v !== 'split-pert' || pertOn())
   && !(SHORT.matches && isSplit(v));
-// Chart for Print / Export → PNG image: the one on screen, else whichever is included.
-const chartKind = () => showsPert() ? 'pert' : ganttOn() ? 'gantt' : pertOn() ? 'pert' : null;
+// What Print / Export → PNG image output: the table on the Table tab, the
+// chart on a chart or split tab, else whichever chart is included.
+const chartKind = () => state.view === 'table' ? 'table'
+  : showsPert() ? 'pert' : ganttOn() ? 'gantt' : pertOn() ? 'pert' : null;
+const KIND_LABEL = { table: 'task table', gantt: 'Gantt chart', pert: 'PERT diagram' };
 
 const state = {
   plan: null,
@@ -313,11 +317,9 @@ function render({ scrollGantt = false } = {}) {
     b.title = kind ? b.dataset.title : 'Turn on Gantt or PERT in Settings to export a chart';
   }
   $('#png-kind').textContent = kind
-    ? `The ${kind === 'pert' ? 'PERT diagram' : 'Gantt chart'}${kind === 'gantt' ? ' at the current zoom' : ''}, for reports and slides`
+    ? `The ${KIND_LABEL[kind]}${kind === 'gantt' ? ' at the current zoom' : ''}, for reports and slides`
     : 'No chart: turn on Gantt or PERT in Settings';
-  $('#print-kind').textContent = kind
-    ? `The ${kind === 'pert' ? 'PERT diagram' : 'Gantt chart'}, or save it as a PDF`
-    : 'No chart: turn on Gantt or PERT in Settings';
+  $('#print-kind').textContent = kind ? `The ${KIND_LABEL[kind]}, or save it as a PDF` : 'No chart: turn on Gantt or PERT in Settings';
   $('#zoom').value = state.zoom;
 
   renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly, hidden: state.hidden });
@@ -672,7 +674,9 @@ function printGantt() {
   const s = state.sched;
   $('#print-area').innerHTML = `<div class="print-title"><h1>${esc(state.plan.name)}</h1>
     <p>${fmtDate(s.start)} – ${fmtDate(s.finish)} · ${s.workdays} working days · Critical path in red · Printed ${new Date().toLocaleDateString()}</p></div>
-    ${chartKind() === 'pert' ? pertPrintSVG(state.plan, s, state.hidden) : ganttPrintSVG(state.plan, s, state.zoom, state.hidden)}`;
+    ${{ table: () => tablePrintHTML(state.plan, s, state.hidden),
+        pert: () => pertPrintSVG(state.plan, s, state.hidden),
+        gantt: () => ganttPrintSVG(state.plan, s, state.zoom, state.hidden) }[chartKind()]()}`;
   document.documentElement.dataset.theme = 'light'; // print in light colors even in dark mode
   window.print();
 }
@@ -688,7 +692,7 @@ function chartExportCSS() {
     if (root[k].startsWith('--')) vars[root[k]] = root.getPropertyValue(root[k]).trim();
   }
   return rules
-    .filter(r => r.selectorText.split(',').every(s => /^\.(g|pt)-/.test(s.trim())))
+    .filter(r => r.selectorText.split(',').every(s => /^\.(g|pt|tx)-/.test(s.trim())))
     .map(r => r.cssText.replace(/var\((--[\w-]+)\)/g, (m, v) => vars[v] ?? m))
     .join('\n');
 }
@@ -699,10 +703,10 @@ const PNG_MAX_PIXELS = 16e6, PNG_MAX_SIDE = 16000;
 
 async function exportPNG() {
   if (!chartKind()) return;
-  const pert = chartKind() === 'pert';
-  const { svg, width, height } = pert
-    ? pertStandaloneSVG(state.plan, state.sched, chartExportCSS(), state.hidden)
-    : ganttStandaloneSVG(state.plan, state.sched, state.zoom, chartExportCSS(), state.hidden);
+  const kind = chartKind(), css = chartExportCSS();
+  const { svg, width, height } = kind === 'table' ? tableStandaloneSVG(state.plan, state.sched, css, state.hidden)
+    : kind === 'pert' ? pertStandaloneSVG(state.plan, state.sched, css, state.hidden)
+    : ganttStandaloneSVG(state.plan, state.sched, state.zoom, css, state.hidden);
   const scale = Math.min(2, PNG_MAX_SIDE / width, PNG_MAX_SIDE / height, Math.sqrt(PNG_MAX_PIXELS / (width * height)));
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   try {
@@ -717,7 +721,7 @@ async function exportPNG() {
     ctx.drawImage(img, 0, 0, width, height);
     const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
     if (!blob) throw new Error('the browser could not encode the image');
-    store.downloadBlob(`${store.safeFilename(state.plan.name)}-${pert ? 'pert' : 'gantt'}.png`, blob);
+    store.downloadBlob(`${store.safeFilename(state.plan.name)}-${kind}.png`, blob);
     toast(scale < 1
       ? `Chart is very large, so it was exported at reduced resolution (${canvas.width}×${canvas.height}). Try a coarser zoom.`
       : `Exported ${canvas.width}×${canvas.height} PNG at the current zoom.`);

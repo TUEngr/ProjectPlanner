@@ -168,7 +168,8 @@
       check(!tab('gantt').hidden && !tab('split').hidden && tab('pert').hidden && tab('split-pert').hidden,
         'Include PERT off hides PERT and Table/PERT tabs only');
       await settings(false, false);
-      check(d.getElementById('btn-png').disabled && d.getElementById('btn-print').disabled, 'with no charts, Export PNG and Print are disabled');
+      check(!d.getElementById('btn-png').disabled && !d.getElementById('btn-print').disabled && /task table/.test(d.getElementById('png-kind').textContent),
+        'with no charts, PNG and Print stay available and output the table');
       await click('undo'); await click('undo'); await click('undo');
       check(['table', 'gantt', 'pert', 'split', 'split-pert'].every(v => !tab(v).hidden) && !d.getElementById('btn-png').disabled,
         'undo restores all views');
@@ -372,6 +373,28 @@
       const li = [...d.querySelectorAll('#plan-list li')].find(l => l.textContent.includes(planBefore));
       li?.querySelector('[data-act="open"]').click(); await sleep(100);
       check(d.getElementById('plan-name').textContent === planBefore, `reopened “${planBefore}” for the remaining tests`);
+
+      // ---- Export / Print on the Table tab output the table ----
+      d.querySelector('.tabs button[data-view="table"]').click(); await sleep(60);
+      check(/task table/.test(d.getElementById('png-kind').textContent) && /task table/.test(d.getElementById('print-kind').textContent),
+        'on the Table tab, PNG and Print describe the task table');
+      const tpng = new Promise(resolve => {
+        const oc = w.HTMLAnchorElement.prototype.click;
+        w.HTMLAnchorElement.prototype.click = function () { w.HTMLAnchorElement.prototype.click = oc; resolve(this.download); };
+      });
+      d.getElementById('btn-png').click();
+      const tname = await Promise.race([tpng, sleep(5000).then(() => null)]);
+      check(/-table\.png$/.test(tname || ''), `Table tab exports the table image (${tname})`);
+      const realPrint = w.print; w.print = () => {};
+      d.getElementById('btn-print').click(); await sleep(30);
+      const pa = d.getElementById('print-area');
+      check(pa.querySelector('table.print-table') && pa.querySelectorAll('tbody tr').length === count() && !pa.querySelector('svg'),
+        `Table tab prints the table (${pa.querySelectorAll('tbody tr').length} rows, no chart)`);
+      d.querySelector('.tabs button[data-view="split"]').click(); await sleep(60);
+      d.getElementById('btn-print').click(); await sleep(30);
+      check(pa.querySelector('svg.gantt-print') && !pa.querySelector('table'), 'Table/Gantt still prints the Gantt chart');
+      w.print = realPrint;
+      w.dispatchEvent(new w.Event('afterprint'));
 
       // ---- PNG export: capture the download instead of saving it ----
       const captured = new Promise(resolve => {

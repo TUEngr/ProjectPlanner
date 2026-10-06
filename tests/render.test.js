@@ -4,6 +4,7 @@ import { schedule, hiddenIds } from '../js/schedule.js';
 import { ganttPrintSVG } from '../js/gantt.js';
 import { samplePlan } from '../js/sample.js';
 import { pertLayout, pertPrintSVG } from '../js/pert.js';
+import { tablePrintHTML, tableStandaloneSVG } from '../js/tableexport.js';
 
 const results = [];
 const plan = samplePlan();
@@ -29,6 +30,16 @@ results.push([(ganttPrintSVG(plan, sched, 'day').match(/class="g-link/g) || []).
   results.push([!/NaN|undefined|Infinity/.test(svg), 'PERT render has valid coordinates']);
 }
 
+// Table export: one row per task, critical rows marked, valid image
+{
+  const html = tablePrintHTML(plan, sched);
+  const rows = (html.match(/<tr/g) || []).length - 1;
+  const crit = (html.match(/<tr class="critical"/g) || []).length;
+  results.push([rows === 16 && crit === 10, `table print has 16 rows, 10 critical (${rows}, ${crit})`]);
+  const { svg, width, height } = tableStandaloneSVG(plan, sched, '');
+  results.push([!/NaN|undefined|Infinity/.test(svg) && width > 1000 && !svg.includes("Durati…") && height === 26 + 16 * 22 + 1, `table image ${width}x${height} with valid coordinates`]);
+}
+
 // Collapse "Detailed design" (row 5, children 6-9)
 plan.tasks[4].collapsed = true;
 const hidden = hiddenIds(plan, sched);
@@ -44,5 +55,7 @@ results.push([(csvg.match(/class="g-link critical/g) || []).length === 7, `merge
   const L = pertLayout(plan, sched, hidden);
   const dd = sched.rows[4].id;
   results.push([L.nodes.length === 10 && L.nodes.some(r => r.id === dd), `collapsed group is one PERT node (${L.nodes.length} nodes, expect 10)`]);
+  const rows = (tablePrintHTML(plan, sched, hidden).match(/<tr/g) || []).length - 1;
+  results.push([rows === 12, `table print leaves out rows inside a collapsed group (${rows} rows, expect 12)`]);
 }
 export default results;

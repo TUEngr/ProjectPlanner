@@ -37,6 +37,8 @@ results.push([(ganttPrintSVG(plan, sched, 'day').match(/class="g-link/g) || []).
   const crit = (html.match(/<tr class="critical"/g) || []).length;
   results.push([rows === 16 && crit === 10, `table print has 16 rows, 10 critical (${rows}, ${crit})`]);
   const { svg, width, height } = tableStandaloneSVG(plan, sched, '');
+  const wider = tableStandaloneSVG(plan, sched, '', new Set(), { name: 2, notes: 0.5 });
+  results.push([wider.width === width + 290 - 115, `table image follows column scale (${width} → ${wider.width}, expect +290 name −115 notes)`]);
   results.push([!/NaN|undefined|Infinity/.test(svg) && width > 1000 && !svg.includes("Durati…") && height === 26 + 16 * 22 + 1, `table image ${width}x${height} with valid coordinates`]);
 }
 

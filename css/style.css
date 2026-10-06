@@ -127,7 +127,16 @@ main.view-split #table-pane { flex: 1 1 45%; border-bottom: 3px solid var(--bord
 main.view-split #gantt-wrap { flex: 1 1 55%; }
 
 /* ---- task table ---- */
-table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
+table.tasks { border-collapse: collapse; width: 100%; table-layout: fixed; } /* widths set per column by applyColumnWidths */
+.tasks td, .tasks th { overflow: hidden; text-overflow: ellipsis; }
+/* Column resize handles: a strip on the right edge of each heading */
+.col-rs { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; touch-action: none; }
+.col-rs::after { content: ''; position: absolute; top: 20%; bottom: 20%; left: 3px; width: 1px; background: var(--border); }
+.col-rs:hover::after, body.resizing .col-rs.active::after { background: var(--accent); width: 2px; left: 2px; }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+/* Gantt task-name column divider (positioned by app.js) */
+.gantt-rs { position: absolute; top: 0; bottom: 0; width: 7px; margin-left: -3px; z-index: 4; cursor: col-resize; touch-action: none; }
+.gantt-rs:hover, body.resizing .gantt-rs.active { background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px); }
 .tasks th {
   position: sticky; top: 0; z-index: 1; background: var(--bg-head);
   text-align: left; font-weight: 600; font-size: 12px; color: var(--fg-muted);
@@ -145,14 +154,12 @@ table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
 .tasks tr.summary input[data-f="name"] { font-weight: 700; }
 .tasks tr.summary input[readonly] { color: var(--fg); }
 .tasks tr.critical input[data-f="name"] { color: var(--crit); }
-.c-num { width: 44px; text-align: right; color: var(--fg-muted); padding-right: 6px !important; font-variant-numeric: tabular-nums; }
-.c-flag { width: 22px; text-align: center; }
+.c-num { text-align: right; color: var(--fg-muted); padding-right: 6px !important; font-variant-numeric: tabular-nums; }
+.c-flag { text-align: center; }
 .flag { color: var(--warn); cursor: help; }
 .flag.ms { color: var(--fg-muted); }
-.c-name { min-width: 220px; }
-.c-dur, .c-pct, .c-float { width: 70px; }
 .c-dur input, .c-pct input { text-align: right; }
-.c-date { width: 150px; white-space: nowrap; }
+.c-date { white-space: nowrap; }
 .c-date input { width: calc(100% - 4px); }
 .c-date.pinned { position: relative; }
 .c-date.pinned input { background: var(--pinned); padding-right: 24px; }
@@ -160,9 +167,6 @@ table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
   position: absolute; right: 30px; top: 4px; border: none; background: none;
   padding: 0 2px; font-size: 12px; line-height: 20px;
 }
-.c-preds { width: 110px; }
-.c-who { width: 120px; }
-.c-notes { min-width: 160px; }
 .c-float { text-align: right; padding-right: 10px !important; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 .tasks tr.critical .c-float { color: var(--crit); font-weight: 600; }
 .tasks td.empty { padding: 16px; color: var(--fg-muted); }
@@ -290,7 +294,8 @@ dialog label input, dialog label textarea, #share-url {
 .tx-rule.strong { stroke: var(--border); }
 
 /* Task table for printing (HTML, so it flows across pages) */
-.print-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+.print-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: fixed; }
+.print-table td, .print-table th { overflow-wrap: anywhere; }
 .print-table thead { display: table-header-group; } /* repeat the header on each page */
 .print-table tr { break-inside: avoid; }
 .print-table th { text-align: left; font-weight: 600; color: #444; background: #eef0f4; border-bottom: 1px solid #999; padding: 3px 4px; }
@@ -310,6 +315,7 @@ dialog label input, dialog label textarea, #share-url {
 body:not(.readonly) .readonly-only { display: none !important; }
 
 @media (max-width: 700px), (max-height: 500px) {
+  .col-rs, .gantt-rs { display: none; } /* no resizing on phones */
   html, body { height: 100%; }
   body { height: 100dvh; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   .topbar { flex-wrap: nowrap; gap: 6px; padding: 4px 8px; padding-top: max(4px, env(safe-area-inset-top)); }

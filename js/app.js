@@ -2,8 +2,8 @@
 
 import { parseISO, toISO } from './calendar.js';
 import { schedule, durationBetween, linksOf, hiddenIds } from './schedule.js';
-import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, esc } from './gantt.js';
-import { renderTable, renderTableHead, parseDuration, parsePredList } from './table.js';
+import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, esc, LABEL_W } from './gantt.js';
+import { renderTable, renderTableHead, parseDuration, parsePredList, COLUMNS, columnWidths, applyColumnWidths } from './table.js';
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
@@ -36,6 +36,8 @@ const state = {
   sched: null,
   selectedId: null,
   readOnly: false,
+  colW: {},          // table column widths the user dragged (px), by field
+  ganttLabelW: null, // Gantt task-name column width the user dragged, or default
   hidden: new Set(), // ids of rows inside collapsed summaries (recomputed by render)
   view: 'split',
   zoom: 'day',
@@ -50,10 +52,26 @@ function loadPrefs() {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
     if (VIEWS.includes(p.view)) state.view = p.view;
     if (['day', 'week', 'month'].includes(p.zoom)) state.zoom = p.zoom;
+    if (p.colW && typeof p.colW === 'object') state.colW = p.colW;
+    if (Number.isFinite(p.ganttLabelW)) state.ganttLabelW = clampLabelW(p.ganttLabelW);
   } catch { /* defaults */ }
 }
 function savePrefs() {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ view: state.view, zoom: state.zoom })); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ view: state.view, zoom: state.zoom, colW: state.colW, ganttLabelW: state.ganttLabelW }));
+  } catch { /* ignore */ }
+}
+
+// ---------- column widths (per browser) ----------
+const LABEL_MIN = 120, LABEL_MAX = 500;
+const clampLabelW = w => Math.round(Math.min(LABEL_MAX, Math.max(LABEL_MIN, w)));
+// Gantt task-name column: fixed narrow on phones, else the user's or default
+const ganttLabelW = () => (PHONE.matches ? 150 : state.ganttLabelW ?? LABEL_W);
+// Each table column's on-screen width relative to its default, for exports
+function columnScale() {
+  const w = columnWidths(state.colW), out = {};
+  for (const c of COLUMNS) out[c.f] = w[c.f] / c.w;
+  return out;
 }
 
 // ---------- toast ----------
@@ -323,13 +341,8 @@ function render({ scrollGantt = false } = {}) {
   $('#zoom').value = state.zoom;
 
   renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly, hidden: state.hidden });
-  const pane = $('#gantt-pane');
-  const { scrollLeft, scrollTop } = pane;
-  renderGantt(pane, plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden, labelW: PHONE.matches ? 150 : 280 });
-  // Keep the floating zoom control clear of the pane's vertical scrollbar
-  $('#gantt-wrap').style.setProperty('--sbw', `${pane.offsetWidth - pane.clientWidth}px`);
-  if (scrollGantt) scrollToDay(pane, state.sched, state.zoom, state.sched.startDay);
-  else { pane.scrollLeft = scrollLeft; pane.scrollTop = scrollTop; }
+  applyColumnWidths($('table.tasks'), columnWidths(state.colW));
+  drawGantt({ scrollGantt });
   if (showsPert()) {
     const pp = $('#pert-pane');
     const keep = { left: pp.scrollLeft, top: pp.scrollTop };
@@ -345,6 +358,71 @@ function render({ scrollGantt = false } = {}) {
   renderStatus();
   updateUndoButtons();
   syncDrawer();
+}
+
+// The Gantt pane alone (also redrawn live while its name column is dragged)
+function drawGantt({ scrollGantt = false } = {}) {
+  const pane = $('#gantt-pane');
+  const { scrollLeft, scrollTop } = pane;
+  const LW = ganttLabelW();
+  renderGantt(pane, state.plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden, labelW: LW });
+  // Keep the floating zoom control clear of the pane's vertical scrollbar
+  $('#gantt-wrap').style.setProperty('--sbw', `${pane.offsetWidth - pane.clientWidth}px`);
+  $('#gantt-rs').style.left = `${LW}px`;
+  if (scrollGantt) scrollToDay(pane, state.sched, state.zoom, state.sched.startDay);
+  else { pane.scrollLeft = scrollLeft; pane.scrollTop = scrollTop; }
+}
+
+// Drag a handle to resize; double-click resets. onMove gets the new width
+// (start width + horizontal travel); onEnd runs once on release.
+function dragResize(handle, startWidth, { onMove, onEnd, onReset }) {
+  handle.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation(); // not a row-reorder drag
+    const x0 = e.clientX, w0 = startWidth(handle);
+    let frame = 0, last = w0;
+    try { handle.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    document.body.classList.add('resizing');
+    handle.classList.add('active');
+    const move = ev => {
+      last = w0 + ev.clientX - x0;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => onMove(last));
+    };
+    const up = () => {
+      cancelAnimationFrame(frame);
+      onMove(last);
+      document.body.classList.remove('resizing');
+      handle.classList.remove('active');
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      onEnd();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  handle.addEventListener('dblclick', e => { e.stopPropagation(); onReset(); });
+  handle.addEventListener('click', e => e.stopPropagation());
+}
+
+function wireResizing() {
+  const table = $('table.tasks');
+  for (const h of document.querySelectorAll('#thead .col-rs')) {
+    const f = h.dataset.col;
+    dragResize(h, () => h.parentElement.getBoundingClientRect().width, {
+      onMove: w => { state.colW[f] = w; applyColumnWidths(table, columnWidths(state.colW)); },
+      onEnd: () => { state.colW[f] = columnWidths(state.colW)[f]; savePrefs(); },
+      onReset: () => { delete state.colW[f]; applyColumnWidths(table, columnWidths(state.colW)); savePrefs(); },
+    });
+  }
+  dragResize($('#gantt-rs'), () => ganttLabelW(), {
+    onMove: w => { state.ganttLabelW = clampLabelW(w); drawGantt(); },
+    onEnd: savePrefs,
+    onReset: () => { state.ganttLabelW = null; drawGantt(); savePrefs(); },
+  });
 }
 
 function renderStatus() {
@@ -674,9 +752,9 @@ function printGantt() {
   const s = state.sched;
   $('#print-area').innerHTML = `<div class="print-title"><h1>${esc(state.plan.name)}</h1>
     <p>${fmtDate(s.start)} – ${fmtDate(s.finish)} · ${s.workdays} working days · Critical path in red · Printed ${new Date().toLocaleDateString()}</p></div>
-    ${{ table: () => tablePrintHTML(state.plan, s, state.hidden),
+    ${{ table: () => tablePrintHTML(state.plan, s, state.hidden, columnScale()),
         pert: () => pertPrintSVG(state.plan, s, state.hidden),
-        gantt: () => ganttPrintSVG(state.plan, s, state.zoom, state.hidden) }[chartKind()]()}`;
+        gantt: () => ganttPrintSVG(state.plan, s, state.zoom, state.hidden, state.ganttLabelW ?? LABEL_W) }[chartKind()]()}`;
   document.documentElement.dataset.theme = 'light'; // print in light colors even in dark mode
   window.print();
 }
@@ -704,9 +782,9 @@ const PNG_MAX_PIXELS = 16e6, PNG_MAX_SIDE = 16000;
 async function exportPNG() {
   if (!chartKind()) return;
   const kind = chartKind(), css = chartExportCSS();
-  const { svg, width, height } = kind === 'table' ? tableStandaloneSVG(state.plan, state.sched, css, state.hidden)
+  const { svg, width, height } = kind === 'table' ? tableStandaloneSVG(state.plan, state.sched, css, state.hidden, columnScale())
     : kind === 'pert' ? pertStandaloneSVG(state.plan, state.sched, css, state.hidden)
-    : ganttStandaloneSVG(state.plan, state.sched, state.zoom, css, state.hidden);
+    : ganttStandaloneSVG(state.plan, state.sched, state.zoom, css, state.hidden, state.ganttLabelW ?? LABEL_W);
   const scale = Math.min(2, PNG_MAX_SIDE / width, PNG_MAX_SIDE / height, Math.sqrt(PNG_MAX_PIXELS / (width * height)));
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   try {
@@ -1038,6 +1116,7 @@ async function loadFromHash() {
 async function init() {
   loadPrefs();
   renderTableHead($('#thead'));
+  wireResizing();
   wireEvents();
   if (!store.storageAvailable()) {
     toast('Browser storage is unavailable (private mode?). Use Export → JSON file to keep your work.', 'error');

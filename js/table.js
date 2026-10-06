@@ -4,25 +4,57 @@
 import { esc } from './gantt.js';
 import { linksOf } from './schedule.js';
 
+// w: default width (px), min: narrowest a user can drag it. Notes is the
+// flexible column: it also takes any space left over when the table is
+// narrower than the pane. The flag column has a fixed width.
 export const COLUMNS = [
-  { f: 'num', label: '#', cls: 'c-num' },
-  { f: 'flag', label: '', cls: 'c-flag' },
-  { f: 'name', label: 'Task name', cls: 'c-name' },
-  { f: 'duration', label: 'Duration (days)', cls: 'c-dur' },
-  { f: 'start', label: 'Start', cls: 'c-date' },
-  { f: 'finish', label: 'Finish', cls: 'c-date' },
-  { f: 'preds', label: 'Predecessors', cls: 'c-preds' },
-  { f: 'pct', label: '% done', cls: 'c-pct' },
-  { f: 'assignee', label: 'Assignee', cls: 'c-who' },
-  { f: 'notes', label: 'Notes', cls: 'c-notes' },
-  { f: 'float', label: 'Float', cls: 'c-float' },
+  { f: 'num', label: '#', cls: 'c-num', w: 44, min: 40 },
+  { f: 'flag', label: '', cls: 'c-flag', w: 22, fixed: true },
+  { f: 'name', label: 'Task name', cls: 'c-name', w: 260, min: 120 },
+  { f: 'duration', label: 'Duration (days)', cls: 'c-dur', w: 104, min: 48 },
+  { f: 'start', label: 'Start', cls: 'c-date', w: 150, min: 124 },
+  { f: 'finish', label: 'Finish', cls: 'c-date', w: 150, min: 124 },
+  { f: 'preds', label: 'Predecessors', cls: 'c-preds', w: 110, min: 60 },
+  { f: 'pct', label: '% done', cls: 'c-pct', w: 70, min: 48 },
+  { f: 'assignee', label: 'Assignee', cls: 'c-who', w: 120, min: 60 },
+  { f: 'notes', label: 'Notes', cls: 'c-notes', w: 200, min: 80, flex: true },
+  { f: 'float', label: 'Float', cls: 'c-float', w: 60, min: 44 },
 ];
+export const COLUMN_MAX = 900;
+
+// Effective widths: the user's (from prefs) clamped to each column's range
+export function columnWidths(custom = {}) {
+  const out = {};
+  for (const c of COLUMNS) {
+    const v = Number(custom[c.f]);
+    out[c.f] = c.fixed || !Number.isFinite(v) ? c.w : Math.round(Math.min(COLUMN_MAX, Math.max(c.min, v)));
+  }
+  return out;
+}
 
 export function renderTableHead(thead) {
   thead.innerHTML = '<tr>' + COLUMNS.map(c => {
     const title = c.f === 'float' ? ' title="Working days this task can slip without delaying the project"' : '';
-    return `<th class="${c.cls}"${title}>${c.label}</th>`;
+    const handle = c.fixed ? '' : `<span class="col-rs" data-col="${c.f}" data-tip="Drag to resize · double-click to reset" aria-hidden="true"></span>`;
+    return `<th class="${c.cls}" data-col="${c.f}"${title}>${c.label}${handle}</th>`;
   }).join('') + '</tr>';
+}
+
+// Fixed table layout with one <col> per column. The table is at least as
+// wide as the pane; the flexible (Notes) column absorbs any extra.
+export function applyColumnWidths(table, widths) {
+  let cg = table.querySelector('colgroup');
+  if (!cg) {
+    cg = document.createElement('colgroup');
+    cg.innerHTML = COLUMNS.map(c => `<col data-col="${c.f}">`).join('');
+    table.prepend(cg);
+  }
+  let sum = 0;
+  for (const c of COLUMNS) {
+    sum += widths[c.f];
+    cg.querySelector(`col[data-col="${c.f}"]`).style.width = c.flex ? '' : `${widths[c.f]}px`;
+  }
+  table.style.width = `max(100%, ${sum}px)`;
 }
 
 export function renderTable(tbody, plan, sched, { selectedId = null, readOnly = false, hidden = new Set() } = {}) {

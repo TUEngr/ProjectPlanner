@@ -8,7 +8,7 @@ import { linkDrives } from './schedule.js';
 
 export const ROW = 26;
 const HEAD = 44;
-const LABEL_W = 280;       // task-name column; narrower on phones (renderGantt labelW)
+export const LABEL_W = 280; // task-name column default; user-resizable, narrower on phones (labelW options)
 const ZOOM_PX = { day: 26, week: 9, month: 3 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -239,28 +239,28 @@ export function scrollToDay(container, sched, zoom, day) {
   container.scrollLeft = Math.max(0, L.x(day) - 2 * L.px);
 }
 
-function wholeChart(plan, sched, zoom, hidden) {
+function wholeChart(plan, sched, zoom, hidden, LW = LABEL_W) {
   const vis = visible(plan, sched, hidden);
   const L = layout(sched, zoom, vis.length);
-  const W = LABEL_W + L.width, H = HEAD + L.height;
+  const W = LW + L.width, H = HEAD + L.height;
   const inner = `${DEFS}
-    <g transform="translate(${LABEL_W},${HEAD})">${body(sched, vis, hidden, L, null)}</g>
-    <g transform="translate(0,${HEAD})">${labels(vis, null)}</g>
-    <g transform="translate(${LABEL_W},0)">${header(L, zoom, sched.cal)}</g>
-    <rect class="g-head-bg" width="${LABEL_W}" height="${HEAD}"/><text class="g-head-text" x="10" y="${HEAD - 10}">Task</text>`;
+    <g transform="translate(${LW},${HEAD})">${body(sched, vis, hidden, L, null)}</g>
+    <g transform="translate(0,${HEAD})">${labels(vis, null, LW)}</g>
+    <g transform="translate(${LW},0)">${header(L, zoom, sched.cal)}</g>
+    <rect class="g-head-bg" width="${LW}" height="${HEAD}"/><text class="g-head-text" x="10" y="${HEAD - 10}">Task</text>`;
   return { W, H, inner };
 }
 
 // One SVG for printing / PDF, styled by the page's stylesheet.
-export function ganttPrintSVG(plan, sched, zoom, hidden = new Set()) {
-  const { W, H, inner } = wholeChart(plan, sched, zoom, hidden);
+export function ganttPrintSVG(plan, sched, zoom, hidden = new Set(), labelW = LABEL_W) {
+  const { W, H, inner } = wholeChart(plan, sched, zoom, hidden, labelW);
   return `<svg class="gantt-print" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMin meet">${inner}</svg>`;
 }
 
 // A standalone SVG document (for rasterizing to PNG). `css` must carry every
 // style the chart needs, since an SVG loaded as an image can't see the page.
-export function ganttStandaloneSVG(plan, sched, zoom, css, hidden = new Set()) {
-  const { W, H, inner } = wholeChart(plan, sched, zoom, hidden);
+export function ganttStandaloneSVG(plan, sched, zoom, css, hidden = new Set(), labelW = LABEL_W) {
+  const { W, H, inner } = wholeChart(plan, sched, zoom, hidden, labelW);
   return {
     width: W, height: H,
     svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`

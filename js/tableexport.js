@@ -15,6 +15,16 @@ const COLS = [
   ['float', 'Float', 48, true],
 ];
 const ROW_H = 22, HEAD_H = 26, PAD = 6, CHAR_W = 6.6, INDENT = 14;
+// Screen column each export column follows when the user resizes columns
+const SCREEN_COL = { row: 'num' };
+
+// Export widths: each default scaled by how much the user widened or
+// narrowed that column on screen (scale = {screenCol: newWidth / default}),
+// so the export keeps the proportions the user chose without inheriting
+// screen-only space such as the date picker button.
+function widthsFor(scale = {}) {
+  return COLS.map(([k, , w]) => Math.max(24, Math.round(w * (scale[SCREEN_COL[k] || k] ?? 1))));
+}
 
 function fmt(n) {
   return new Date(n * 86400000).toLocaleDateString(undefined, { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -39,8 +49,10 @@ function rowsFor(plan, sched, hidden) {
   }));
 }
 
-export function tablePrintHTML(plan, sched, hidden = new Set()) {
+export function tablePrintHTML(plan, sched, hidden = new Set(), scale = {}) {
   const rows = rowsFor(plan, sched, hidden);
+  const ws = widthsFor(scale), total = ws.reduce((a, b) => a + b, 0);
+  const cols = ws.map(w => `<col style="width:${(100 * w / total).toFixed(2)}%">`).join('');
   const head = COLS.map(([k, h, , right]) => `<th class="tp-${k}${right ? ' num' : ''}">${h}</th>`).join('');
   const body = rows.map(x => `<tr class="${[x.summary && 'summary', x.critical && 'critical'].filter(Boolean).join(' ')}">`
     + COLS.map(([k, , , right]) => {
@@ -48,7 +60,7 @@ export function tablePrintHTML(plan, sched, hidden = new Set()) {
       const warn = k === 'name' && x.warn ? '⚠ ' : '';
       return `<td class="tp-${k}${right ? ' num' : ''}"${pad}>${warn}${esc(x.cells[k])}</td>`;
     }).join('') + '</tr>').join('');
-  return `<table class="print-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  return `<table class="print-table"><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function clip(s, px) {
@@ -56,14 +68,15 @@ function clip(s, px) {
   return s.length > n ? s.slice(0, Math.max(1, n - 1)) + '…' : s;
 }
 
-export function tableStandaloneSVG(plan, sched, css, hidden = new Set()) {
+export function tableStandaloneSVG(plan, sched, css, hidden = new Set(), scale = {}) {
   const rows = rowsFor(plan, sched, hidden);
-  const width = COLS.reduce((a, c) => a + c[2], 0);
+  const ws = widthsFor(scale);
+  const width = ws.reduce((a, b) => a + b, 0);
   const height = HEAD_H + rows.length * ROW_H + 1;
   const xs = [];
-  COLS.reduce((x, c) => { xs.push(x); return x + c[2]; }, 0);
+  ws.reduce((x, w) => { xs.push(x); return x + w; }, 0);
   const text = (k, i, s, cls, y, indent = 0) => {
-    const [, , w, right] = COLS[i];
+    const w = ws[i], right = COLS[i][3];
     const x = right ? xs[i] + w - PAD : xs[i] + PAD + indent;
     return `<text class="${cls}" x="${x}" y="${y}"${right ? ' text-anchor="end"' : ''}>${esc(clip(s, w - 2 * PAD - indent))}</text>`;
   };

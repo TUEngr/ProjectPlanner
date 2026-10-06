@@ -61,6 +61,7 @@
       </table>
     </section>
     <div id="gantt-wrap">
+      <div id="gantt-rs" class="gantt-rs" data-tip="Drag to resize the task-name column · double-click to reset" aria-hidden="true"></div>
       <label class="zoom">Zoom
         <select id="zoom">
           <option value="day">Days</option>
@@ -224,6 +225,7 @@
     <h2>Using Project Planner</h2>
     <ul class="help">
       <li><strong>Views</strong>: <em>Table</em>, <em>Gantt</em>, and <em>PERT</em> show one view each. <em>Table/Gantt</em> and <em>Table/PERT</em> show the table above the chart. The selected task is highlighted in every view. A plan can leave out the Gantt or PERT tabs: see <em>Settings</em>.</li>
+      <li><strong>Column widths</strong>: drag the edge of a table column heading to resize it, or drag the line between the Gantt chart's task names and its bars. Double-click an edge to reset that column. Notes takes up any spare width. Widths are remembered in this browser for all plans, and the table and Gantt exports (PNG image and Print) keep the proportions you set. Resizing is not available in the phone layout.</li>
       <li><strong>On a phone</strong> the toolbars move into a menu: tap <strong>☰</strong> at the top left. It shows the plan's dates and status, the editing tools (acting on the selected task, named at the top of that section), the views, and Plans, Settings, Open, Export, Print, and Help. Tap outside it, press ✕, or swipe it left to close it. In landscape the split views are left out (there isn't room for two panes), and the editing tools leave the menu open so you can repeat Indent or Move up and watch the result.</li>
       <li><strong>Adding tasks</strong>: <em>+ Task</em> adds a row after the selected task (or as the first subtask of a selected summary). <em>Insert</em> adds a row above it. Pressing Enter in the last row's name also adds a task. <em>Delete</em> removes the selected task; its subtasks move up one level and links to it are removed.</li>
       <li><strong>Keyboard</strong>: Enter / Shift+Enter commits a cell and moves down / up the column. Esc cancels the edit. ⌘/Ctrl+Z undoes; ⌘/Ctrl+Shift+Z or Ctrl+Y redoes.</li>

@@ -12,6 +12,7 @@ A browser-based project planner with a task table and a Gantt chart. The Gantt c
 - Start dates can be pinned manually. If a pinned date conflicts with a predecessor, the pin is kept and the task is flagged with ⚠.
 - Shows critical path and total float.
 - Views: table, Gantt chart, PERT network diagram, and table-plus-chart splits, with undo/redo. A plan can leave out the Gantt or PERT views.
+- Table columns and the Gantt task-name column can be resized by dragging (remembered per browser; exports follow them).
 - On phones (portrait or landscape) the toolbars collapse into a ☰ drawer, leaving the screen to the chart.
 
 ## Saving and sharing

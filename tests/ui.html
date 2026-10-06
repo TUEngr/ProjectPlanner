@@ -460,6 +460,57 @@
       d.querySelector('.tabs button[data-view="split"]').click();
       await sleep(60);
 
+      // ---- Column resizing ----
+      d.querySelector('.tabs button[data-view="split"]').click(); await sleep(60);
+      const th = f => d.querySelector(`#thead th[data-col="${f}"]`);
+      const thW = f => Math.round(th(f).getBoundingClientRect().width);
+      const rs = f => th(f).querySelector('.col-rs');
+      const dragBy = async (el, dx) => {
+        const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+        const ev = (type, cx) => el.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, button: 0, clientX: cx, clientY: y }));
+        ev('pointerdown', x); ev('pointermove', x + dx / 2); ev('pointermove', x + dx); ev('pointerup', x + dx);
+        await sleep(60);
+      };
+      check(thW('name') === 260 && thW('start') === 150, `default widths (name ${thW('name')}, start ${thW('start')})`);
+      const order0 = names().join('|');
+      await dragBy(rs('name'), 100);
+      check(Math.abs(thW('name') - 360) <= 1, `dragging the Task name edge widens it by 100 px (${thW('name')})`);
+      check(names().join('|') === order0 && count() === order0.split('|').length, 'resizing does not reorder or add rows');
+      await dragBy(rs('start'), -300);
+      check(thW('start') === 124, `a column stops at its minimum width (start ${thW('start')}, min 124)`);
+      rs('start').dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true }));
+      await sleep(30);
+      check(thW('start') === 150, `double-clicking the edge resets the column (${thW('start')})`);
+      await dragBy(rs('num'), 20);
+      check(names().join('|') === order0, 'dragging the # column edge resizes instead of moving a row');
+      rs('num').dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true })); await sleep(30);
+      // the row-number grip still reorders rows
+      await drag(row(6).querySelector('.c-num'), row(8).getBoundingClientRect().bottom - 2);
+      check(cell(8, 'name').value === 'Mechanical CAD', 'the # grip still reorders rows after resizing');
+      await click('undo');
+      // Gantt task-name divider
+      const gLabW = () => Math.round(d.querySelector('#gantt-pane .g-labels svg').width.baseVal.value);
+      check(gLabW() === 280, `Gantt name column defaults to 280 (${gLabW()})`);
+      await dragBy(d.getElementById('gantt-rs'), 80);
+      check(gLabW() === 360 && parseInt(d.getElementById('gantt-rs').style.left) === 360, `dragging the Gantt divider widens the name column (${gLabW()})`);
+      await dragBy(d.getElementById('gantt-rs'), -1000);
+      check(gLabW() === 120, `the Gantt name column stops at 120 px (${gLabW()})`);
+      d.getElementById('gantt-rs').dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true })); await sleep(30);
+      check(gLabW() === 280, 'double-clicking the divider resets it');
+      await dragBy(d.getElementById('gantt-rs'), 40);
+      // Exports follow the widths
+      const gsvg = d.getElementById('btn-print'); w.print = () => {};
+      gsvg.click(); await sleep(30);
+      const pr = d.querySelector('#print-area svg.gantt-print');
+      check(pr && /^0 0 /.test(pr.getAttribute('viewBox')) && d.querySelector('#print-area svg.gantt-print rect.g-label-bg').getAttribute('width') === '320',
+        'printed Gantt uses the resized name column (320 px)');
+      d.querySelector('.tabs button[data-view="table"]').click(); await sleep(60);
+      gsvg.click(); await sleep(30);
+      const cols = [...d.querySelectorAll('#print-area .print-table col')].map(c => parseFloat(c.style.width));
+      check(cols.length === 10 && cols[1] > 30, `printed table gives Task name a larger share after widening (${cols[1].toFixed(1)}%)`);
+      w.dispatchEvent(new w.Event('afterprint'));
+      d.querySelector('.tabs button[data-view="split"]').click(); await sleep(60);
+
       // Persistence: reload the frame, plan is still there with edits
       const name = d.getElementById('plan-name').textContent;
       w.location.reload();
@@ -468,6 +519,9 @@
       const d2 = frame.contentDocument;
       check(d2.getElementById('plan-name').textContent === name && d2.querySelectorAll('#tbody tr[data-id]').length === n0 + 1,
         'plan persists across reload');
+      check(Math.round(d2.querySelector('#thead th[data-col="name"]').getBoundingClientRect().width) === 360
+        && Math.round(d2.querySelector('#gantt-pane .g-labels svg').width.baseVal.value) === 320,
+        'column widths survive a reload (per-browser preference)');
     } catch (e) {
       check(false, `exception: ${e.message}`);
     }

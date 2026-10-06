@@ -511,6 +511,13 @@
       w.dispatchEvent(new w.Event('afterprint'));
       d.querySelector('.tabs button[data-view="split"]').click(); await sleep(60);
 
+      // Help shows the version and links to the changelog
+      const ver = d.getElementById('app-version')?.textContent;
+      const clink = [...d.querySelectorAll('#dlg-help a')].find(a => /CHANGELOG\.md$/.test(a.href));
+      check(/^\d+\.\d+\.\d+$/.test(ver || '') && clink, `Help shows version ${ver} and links to the changelog`);
+      const clog = await (await fetch('../CHANGELOG.md')).text();
+      check(clog.includes(`## ${ver} — `), `CHANGELOG.md has an entry for version ${ver}`);
+
       // Persistence: reload the frame, plan is still there with edits
       const name = d.getElementById('plan-name').textContent;
       w.location.reload();

@@ -26,6 +26,10 @@ No server is involved. Plans are stored in each user's browser (localStorage).
 - **Export → PNG image** downloads the current view (task table, Gantt chart, or PERT diagram) as an image for reports.
 - **Export → Print** prints the current view (task table, Gantt chart, or PERT diagram), or saves it as a PDF.
 
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md). The current version is also shown at the bottom of the app's Help; update both with each release.
+
 ## Development
 
 Plain ES modules with no build step. To serve locally:

@@ -66,7 +66,7 @@ export function renderTable(tbody, plan, sched, { selectedId = null, readOnly = 
     const lockedRO = readOnly || r.summary ? ' readonly tabindex="-1"' : '';
     const predText = linksOf(t).filter(l => rowOf.has(l.id)).map(l => ({ row: rowOf.get(l.id), type: l.type }))
       .sort((a, b) => a.row - b.row).map(formatLink).join(', ');
-    const cls = [r.summary && 'summary', !r.summary && r.critical && 'critical', r.milestone && 'milestone',
+    const cls = [r.summary && 'summary', !r.summary && r.critical && 'critical', !r.summary && r.near && 'near', r.milestone && 'milestone',
       r.id === selectedId && 'selected', r.issues.length && 'has-issue'].filter(Boolean).join(' ');
     const flag = r.issues.length
       ? `<span class="flag" tabindex="0" data-tip="${esc(r.issues.join('\n'))}" aria-label="Warning: ${esc(r.issues.join('; '))}">⚠</span>`

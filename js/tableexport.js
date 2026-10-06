@@ -35,7 +35,7 @@ function rowsFor(plan, sched, hidden) {
   const rowOf = new Map(sched.rows.map(r => [r.id, r.row]));
   return sched.rows.map((r, i) => ({ r, t: plan.tasks[i] })).filter(({ r }) => !hidden.has(r.id)).map(({ r, t }) => ({
     level: r.level,
-    summary: r.summary, milestone: r.milestone, critical: !r.summary && r.critical, warn: r.issues.length > 0,
+    summary: r.summary, milestone: r.milestone, critical: !r.summary && r.critical, near: !r.summary && r.near, warn: r.issues.length > 0,
     cells: {
       row: String(r.row),
       name: `${r.milestone ? '◆ ' : ''}${t.name || '(unnamed)'}${r.summary && t.collapsed ? ' ▸' : ''}`,
@@ -63,7 +63,7 @@ export function tablePrintHTML(plan, sched, hidden = new Set(), screen = {}) {
     ? `<col class="tp-text" style="width:${(100 * share(k) / textTotal).toFixed(2)}%">`
     : '<col class="tp-fit" style="width:1%">')).join('');
   const head = COLS.map(([k, h, , right]) => `<th class="tp-${k}${right ? ' num' : ''}">${h}</th>`).join('');
-  const body = rows.map(x => `<tr class="${[x.summary && 'summary', x.critical && 'critical'].filter(Boolean).join(' ')}">`
+  const body = rows.map(x => `<tr class="${[x.summary && 'summary', x.critical && 'critical', x.near && 'near'].filter(Boolean).join(' ')}">`
     + COLS.map(([k, , , right]) => {
       const pad = k === 'name' ? ` style="padding-left:${4 + x.level * INDENT}px"` : '';
       const warn = k === 'name' && x.warn ? '⚠ ' : '';
@@ -94,10 +94,10 @@ export function tableStandaloneSVG(plan, sched, css, hidden = new Set(), scale =
   rows.forEach((x, j) => {
     const y = HEAD_H + j * ROW_H;
     if (j % 2) out.push(`<rect class="tx-odd" y="${y}" width="${width}" height="${ROW_H}"/>`);
-    const cls = ['tx-cell', x.summary && 'summary', x.critical && 'critical'].filter(Boolean).join(' ');
+    const cls = ['tx-cell', x.summary && 'summary', x.critical && 'critical', x.near && 'near'].filter(Boolean).join(' ');
     COLS.forEach(([k], i) => {
       const s = (k === 'name' && x.warn ? '⚠ ' : '') + x.cells[k];
-      out.push(text(k, i, s, k === 'row' || k === 'float' && !x.critical ? `${cls} muted` : cls, y + 15, k === 'name' ? x.level * INDENT : 0));
+      out.push(text(k, i, s, k === 'row' || k === 'float' && !x.critical && !x.near ? `${cls} muted` : cls, y + 15, k === 'name' ? x.level * INDENT : 0));
     });
     out.push(`<line class="tx-rule" x1="0" y1="${y + ROW_H}" x2="${width}" y2="${y + ROW_H}"/>`);
   });

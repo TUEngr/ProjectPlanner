@@ -4,6 +4,10 @@ What changed in each version of [Project Planner](https://tuengr.github.io/Proje
 
 Version numbers: the middle number goes up for new features, the last number for fixes and smaller improvements.
 
+## 1.9.0 — 2026-10-06
+- Near-critical tasks: tasks with a little float (5 working days or less by default, set in Settings; 0 turns it off) are shown in orange in the table, Gantt chart, PERT diagram, and exports, and counted in the status bar.
+- Help explains why the work before a pinned date can have float and not be red: when it finishes early, the pin sets the project end. Working Saturdays in a plan with a pinned final presentation was one way to see this.
+
 ## 1.8.1 — 2026-10-06
 - Help now shows the version number and links to this changelog.
 

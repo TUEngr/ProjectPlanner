@@ -17,6 +17,11 @@ for (const zoom of ['day', 'week', 'month']) {
 const crit = sched.rows.filter(r => !r.summary && r.critical).map(r => r.row);
 results.push([crit.join() === '2,3,4,7,8,9,11,14,15,16', `sample critical path rows: ${crit.join(', ')}`]);
 results.push([(ganttPrintSVG(plan, sched, 'day').match(/class="g-link/g) || []).length === 15, 'sample has 15 dependency arrows']);
+{
+  const near = sched.rows.filter(r => r.near).map(r => r.row).join();
+  const svg = ganttPrintSVG(plan, sched, 'day');
+  results.push([near === '6,12' && (svg.match(/g-bar near/g) || []).length === 2, `sample near-critical rows (float ≤ 5): ${near}; drawn orange`]);
+}
 
 // PERT: 13 task nodes; column = dependency depth
 {

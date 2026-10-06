@@ -86,7 +86,7 @@ function labels(vis, selectedId, LW = LABEL_W) {
     const twisty = r.summary
       ? `<text class="g-twisty" data-act="toggle" x="${x + 4}" y="${y + 17}" text-anchor="middle" data-tip="${t.collapsed ? 'Expand' : 'Collapse'} (or double-click the row)">${t.collapsed ? '▸' : '▾'}</text>`
       : '';
-    const cls = ['g-label', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '', r.id === selectedId ? 'selected' : ''].join(' ');
+    const cls = ['g-label', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '', !r.summary && r.near ? 'near' : '', r.id === selectedId ? 'selected' : ''].join(' ');
     const warn = r.issues.length ? `<tspan class="g-warn" data-tip="${esc(r.issues.join('\n'))}">⚠</tspan> ` : '';
     const pin = r.pinned ? ` <tspan class="g-pin" data-tip="Pinned start date: ${r.start}. The task stays there instead of following its predecessors.">📌</tspan>` : '';
     out.push(`<g class="g-row" data-id="${r.id}">`
@@ -142,7 +142,7 @@ function body(sched, vis, hidden, L, selectedId) {
   const shown = id => { while (hidden.has(id)) id = sched.byId.get(id).parent; return sched.byId.get(id); };
 
   // Dependency arrows (drawn first so bars sit on top)
-  const arrows = new Map(); // key -> { d, crit }; merged links are critical if any part is
+  const arrows = new Map(); // key -> { d, crit, near }; merged links take the strongest of their parts
   for (const s of sched.rows) {
     if (s.summary) continue;
     const r = shown(s.id);
@@ -152,7 +152,9 @@ function body(sched, vis, hidden, L, selectedId) {
       if (p === r) continue; // both ends inside the same collapsed group
       const key = `${p.id}>${r.id}:${type}`;
       const crit = p0.critical && s.critical && linkDrives(p0, s, type);
-      if (arrows.has(key)) { arrows.get(key).crit ||= crit; continue; }
+      // Near-critical: a driving link within a chain of near-critical/critical tasks
+      const near = !crit && (p0.critical || p0.near) && (s.critical || s.near) && linkDrives(p0, s, type);
+      if (arrows.has(key)) { const a = arrows.get(key); a.crit ||= crit; a.near ||= near; continue; }
       const pg = geom(p);
       const ye = pg.mid, ys = g.mid;
       let d;
@@ -173,12 +175,14 @@ function body(sched, vis, hidden, L, selectedId) {
           d = `M${xe},${ye} h7 V${yb} H${xs - 8} V${ys} H${xs - 1}`;
         }
       }
-      arrows.set(key, { d, crit });
+      arrows.set(key, { d, crit, near });
     }
   }
-  // Critical links drawn last so they are not hidden under grey ones
-  for (const { d, crit } of [...arrows.values()].sort((a, b) => a.crit - b.crit)) {
-    out.push(`<path class="g-link${crit ? ' critical' : ''}" d="${d}" marker-end="url(#${crit ? 'arrow-crit' : 'arrow'})"/>`);
+  // Critical links drawn last so they are not hidden under grey or orange ones
+  const rank = a => (a.crit ? 2 : a.near ? 1 : 0);
+  for (const a of [...arrows.values()].sort((x, y) => rank(x) - rank(y))) {
+    const kind = a.crit ? 'critical' : a.near ? 'near' : '';
+    out.push(`<path class="g-link${kind ? ' ' + kind : ''}" d="${a.d}" marker-end="url(#${a.crit ? 'arrow-crit' : a.near ? 'arrow-near' : 'arrow'})"/>`);
   }
 
   // FF arrows turn just right of the bar end, so labels there move further out
@@ -189,7 +193,7 @@ function body(sched, vis, hidden, L, selectedId) {
   vis.forEach(({ r, t }) => {
     const g = geom(r);
     const tip = esc(`${r.row}. ${t.name}\n${r.start}${r.milestone ? '' : ' → ' + r.finish}`
-      + `${r.summary ? '' : `\n${r.duration} working day${r.duration === 1 ? '' : 's'}, float ${r.float ?? '?'}`}`
+      + `${r.summary ? '' : `\n${r.duration} working day${r.duration === 1 ? '' : 's'}, float ${r.float ?? '?'}${r.critical ? ' (critical)' : r.near ? ' (near-critical)' : ''}`}`
       + `${r.pct ? `\n${r.pct}% complete` : ''}${t.assignee ? `\n${t.assignee}` : ''}`
       + `${r.issues.length ? '\n⚠ ' + r.issues.join('\n⚠ ') : ''}`);
     const conflict = r.issues.length ? ' conflict' : '';
@@ -199,12 +203,12 @@ function body(sched, vis, hidden, L, selectedId) {
       shape = `<path class="g-summary" d="M${x1},${y} H${x2} V${y + h + 5} L${x2 - 5},${y + h} H${x1 + 5} L${x1},${y + h + 5} Z"/>`;
     } else if (r.milestone) {
       const x = (g.x1 + g.x2) / 2, y = g.mid, s = 7;
-      shape = `<path class="g-milestone${r.critical ? ' critical' : ''}${conflict}" d="M${x},${y - s} L${x + s},${y} L${x},${y + s} L${x - s},${y} Z"/>`;
+      shape = `<path class="g-milestone${r.critical ? ' critical' : r.near ? ' near' : ''}${conflict}" d="M${x},${y - s} L${x + s},${y} L${x},${y + s} L${x - s},${y} Z"/>`;
     } else {
       const y = g.top + 6, h = ROW - 12, w = Math.max(g.x2 - g.x1, 2);
       const pw = w * r.pct / 100;
-      shape = `<rect class="g-bar${r.critical ? ' critical' : ''}${conflict}" x="${g.x1}" y="${y}" width="${w}" height="${h}" rx="2"/>`
-        + (pw > 0 ? `<rect class="g-progress${r.critical ? ' critical' : ''}" x="${g.x1}" y="${y + h / 2 - 2}" width="${pw}" height="4"/>` : '');
+      shape = `<rect class="g-bar${r.critical ? ' critical' : r.near ? ' near' : ''}${conflict}" x="${g.x1}" y="${y}" width="${w}" height="${h}" rx="2"/>`
+        + (pw > 0 ? `<rect class="g-progress${r.critical ? ' critical' : r.near ? ' near' : ''}" x="${g.x1}" y="${y + h / 2 - 2}" width="${pw}" height="4"/>` : '');
     }
     const note = t.assignee ? `<text class="g-bar-text" x="${g.x2 + (ffEnds.has(r.id) ? 14 : 6)}" y="${g.mid + 4}">${esc(t.assignee)}</text>` : '';
     out.push(`<g class="g-task" data-id="${r.id}" data-tip="${tip}">${shape}${note}</g>`);
@@ -214,6 +218,7 @@ function body(sched, vis, hidden, L, selectedId) {
 
 const DEFS = `<defs>
   <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="g-arrowhead" d="M0,0 L8,4 L0,8 Z"/></marker>
+  <marker id="arrow-near" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="g-arrowhead near" d="M0,0 L8,4 L0,8 Z"/></marker>
   <marker id="arrow-crit" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="g-arrowhead critical" d="M0,0 L8,4 L0,8 Z"/></marker>
 </defs>`;
 

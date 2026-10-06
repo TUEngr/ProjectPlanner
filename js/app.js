@@ -1,7 +1,7 @@
 // Application controller: state, editing commands, persistence, and views.
 
 import { parseISO, toISO } from './calendar.js';
-import { schedule, durationBetween, linksOf, hiddenIds } from './schedule.js';
+import { schedule, durationBetween, linksOf, hiddenIds, nearCriticalDays } from './schedule.js';
 import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, esc, LABEL_W } from './gantt.js';
 import { renderTable, renderTableHead, parseDuration, parsePredList, COLUMNS, columnWidths, applyColumnWidths } from './table.js';
 import * as store from './storage.js';
@@ -439,6 +439,7 @@ function renderStatus() {
   const s = state.sched;
   const leaves = s.rows.filter(r => !r.summary);
   const crit = leaves.filter(r => r.critical).length;
+  const near = leaves.filter(r => r.near).length;
   const issues = s.rows.filter(r => r.issues.length).length;
   const done = leaves.length
     ? Math.round(leaves.reduce((a, r) => a + r.pct * Math.max(r.duration, 1), 0) / leaves.reduce((a, r) => a + Math.max(r.duration, 1), 0))
@@ -447,7 +448,7 @@ function renderStatus() {
     `<span><b>Start</b> ${fmtDate(s.start)}</span>`,
     `<span><b>Finish</b> ${fmtDate(s.finish)}</span>`,
     `<span><b>${s.workdays}</b> working days</span>`,
-    `<span><b>${leaves.length}</b> tasks, <span class="crit-text">${crit} critical</span></span>`,
+    `<span><b>${leaves.length}</b> tasks, <span class="crit-text">${crit} critical</span>${near ? `, <span class="near-text">${near} near-critical</span>` : ''}</span>`,
     `<span><b>${done}%</b> complete</span>`,
     issues ? `<span class="warn-text">⚠ ${issues} warning${issues > 1 ? 's' : ''}</span>` : '',
     `<span class="save-state">${state.readOnly ? 'Read-only' : 'Saved in this browser'}</span>`,
@@ -712,6 +713,7 @@ function showSettings() {
   f.satOff.checked = state.plan.satOff !== false;
   f.showGantt.checked = ganttOn();
   f.showPert.checked = pertOn();
+  f.nearCritical.value = nearCriticalDays(state.plan);
   f.sunOff.checked = state.plan.sunOff !== false;
   $('#dlg-settings').showModal();
 }
@@ -737,6 +739,7 @@ function saveSettings() {
     plan.satOff = f.satOff.checked;
     plan.showGantt = f.showGantt.checked;
     plan.showPert = f.showPert.checked;
+    plan.nearCritical = nearCriticalDays({ nearCritical: f.nearCritical.value === '' ? 0 : f.nearCritical.value });
     plan.sunOff = f.sunOff.checked;
   });
   if (bad.length) toast(`Ignored ${bad.length} line(s) that did not start with a YYYY-MM-DD date.`, 'error');

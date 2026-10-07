@@ -1,0 +1,58 @@
+# Publishes GitHub Pages from two branches:
+#   main   -> https://tuengr.github.io/ProjectPlanner/
+#   collab -> https://tuengr.github.io/ProjectPlanner/collab/   (collaborative test version)
+# A push to either branch rebuilds both, so neither overwrites the other.
+# The same file lives on both branches.
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main, collab]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+      - name: Check out collab
+        uses: actions/checkout@v4
+        with:
+          ref: collab
+          path: collab
+        continue-on-error: true # the branch may be deleted later
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          rsync -a --exclude .git --exclude .github main/ _site/
+          if [ -f collab/index.html ]; then
+            mkdir -p _site/collab
+            rsync -a --exclude .git --exclude .github collab/ _site/collab/
+          fi
+          ls _site _site/collab 2>/dev/null | head -50
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -26,7 +26,7 @@ export function attachReorder(pane, { grip, rows, canDrop, onDrop, enabled }) {
     const g = e.target.closest(grip);
     const holder = g?.closest('[data-id]');
     if (!g || !holder || !pane.contains(g)) return;
-    drag = { id: Number(holder.dataset.id), y0: e.clientY, x: e.clientX, y: e.clientY, active: false, index: null, pointer: e.pointerId };
+    drag = { id: holder.dataset.id, y0: e.clientY, x: e.clientX, y: e.clientY, active: false, index: null, pointer: e.pointerId };
   });
 
   pane.addEventListener('pointermove', e => {

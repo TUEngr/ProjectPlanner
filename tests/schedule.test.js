@@ -195,7 +195,8 @@ test('normalize upgrades bare-id predecessors and drops bad links', () => {
     { id: 1, name: 'a', duration: 1, preds: [] },
     { id: 2, name: 'b', duration: 1, preds: [1, { id: 1, type: 'SS' }, { id: 1, type: 'XX' }, 'junk'] },
   ] });
-  eq(p.tasks[1].preds, [{ id: 1, type: 'FS' }, { id: 1, type: 'SS' }]);
+  eq(p.tasks[1].preds, [{ id: 't1', type: 'FS' }, { id: 't1', type: 'SS' }]);
+  eq(p.tasks.map(t => t.id), ['t1', 't2']); // integer ids migrate to 't<n>'
 });
 
 test('collapsed groups hide descendants; nested state survives', () => {
@@ -261,8 +262,8 @@ test('parseCSV: quotes, embedded newlines, semicolons, BOM', () => {
 
 test('CSV round trip: export then import keeps structure, links and schedule', () => {
   const sp = samplePlan();
-  sp.tasks[6].preds = [{ id: 6, type: 'SS' }];
-  sp.tasks[7].preds = [{ id: 6, type: 'FF' }];
+  sp.tasks[6].preds = [{ id: sp.tasks[5].id, type: 'SS' }];
+  sp.tasks[7].preds = [{ id: sp.tasks[5].id, type: 'FF' }];
   sp.tasks[2].manualStart = '2026-10-20';
   const s1 = schedule(sp);
   const { plan: raw, warnings } = csvToPlan(planToCSV(sp, s1), { name: 'rt', parsePreds: parsePredList, isoDate: csvDate });
@@ -282,7 +283,7 @@ test('CSV import: hand-made sheet with WBS levels, US dates, no Row column', () 
   eq(warnings, []);
   eq(p.start, '2026-10-05');
   eq(p.tasks.map(t => [t.name, t.level, t.duration]), [['Phase', 0, 1], ['Dig', 1, 3], ['Pour', 1, 2], ['Done', 0, 0]]);
-  eq(p.tasks[2].preds, [{ id: 2, type: 'FS' }]);
+  eq(p.tasks[2].preds, [{ id: 't2', type: 'FS' }]); // CSV row numbers become task ids t<row>
 });
 
 test('CSV import: bad references warn; missing Task column throws', () => {
@@ -300,7 +301,7 @@ test('CSV template imports cleanly', () => {
   const p = normalize(raw);
   eq(warnings, []);
   eq(p.tasks.map(t => t.name), ['Phase 1', 'Design', 'Build', 'Write test plan', 'Design review', 'Final demo']);
-  eq(p.tasks[3].preds, [{ id: 3, type: 'SS' }]);
+  eq(p.tasks[3].preds, [{ id: 't3', type: 'SS' }]);
   eq(p.tasks[4].duration, 0);
   const s = schedule(p);
   eq(s.rows[0].summary && !s.rows[4].summary, true);

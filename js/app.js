@@ -10,6 +10,8 @@ import { attachReorder } from './reorder.js';
 import { planToCSV, csvToPlan, csvTemplate, csvDate } from './csv.js';
 import { tablePrintHTML, tableStandaloneSVG } from './tableexport.js';
 import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
+import { RepoApi, RepoSession, repoToken } from './repo.js';
+import { parseSlug, repoUrl, codespacesUrl, pageRepo, pageBundlePath, loadBundle } from './site.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
@@ -36,6 +38,9 @@ const state = {
   sched: null,
   selectedId: null,
   readOnly: false,
+  repo: null,    // RepoSession when the plan lives in a git clone (served by server/serve.py)
+  git: null,     // last git status from the helper
+  locked: false, // true while syncing: no edits
   colW: {},          // table column widths the user dragged (px), by field
   ganttLabelW: null, // Gantt task-name column width the user dragged, or default
   hidden: new Set(), // ids of rows inside collapsed summaries (recomputed by render)
@@ -269,12 +274,17 @@ function openPlan(plan, { readOnly = false } = {}) {
 
 function persist() {
   if (state.readOnly) return;
+  if (state.repo) { // repo mode: the clone's data/ is the store; collapse state stays per person
+    saveCollapsed();
+    state.repo.markDirty();
+    return;
+  }
   if (!store.savePlan(state.plan)) toast('Could not save to browser storage. Use Export → JSON file to keep your work.', 'error');
 }
 
 // Wrap every edit: snapshot for undo, mutate, save, re-render.
 function commit(mutator) {
-  if (state.readOnly) return;
+  if (state.readOnly || state.locked) return;
   const before = JSON.stringify(state.plan);
   const result = mutator(state.plan);
   if (result === false) return; // mutator rejected the change
@@ -287,6 +297,7 @@ function commit(mutator) {
 }
 
 function undo() {
+  if (state.locked) return;
   if (!state.undo.length) return toast('Nothing to undo');
   state.redo.push(JSON.stringify(state.plan));
   state.plan = JSON.parse(state.undo.pop());
@@ -294,11 +305,332 @@ function undo() {
   render();
 }
 function redo() {
+  if (state.locked) return;
   if (!state.redo.length) return toast('Nothing to redo');
   state.undo.push(JSON.stringify(state.plan));
   state.plan = JSON.parse(state.redo.pop());
   persist();
   render();
+}
+
+// ---------- repo mode ----------
+// When served by server/serve.py the plan is data/ in this git clone. Edits are
+// saved to disk automatically; Sync commits, pulls teammates' changes and pushes.
+// Which groups are collapsed is a per-person view choice, kept in this browser.
+
+const collapsedKey = id => `projectplanner.collapsed.${id}`;
+
+function applyCollapsed(plan) {
+  try {
+    const ids = new Set(JSON.parse(localStorage.getItem(collapsedKey(plan.id)) || '[]'));
+    for (const t of plan.tasks) t.collapsed = ids.has(t.id);
+  } catch { /* all expanded */ }
+  return plan;
+}
+function saveCollapsed() {
+  try { localStorage.setItem(collapsedKey(state.plan.id), JSON.stringify(state.plan.tasks.filter(t => t.collapsed).map(t => t.id))); } catch { /* ignore */ }
+}
+
+// The plan changed under the user (a merge or a pull): show it, keep the selection.
+function adoptPlan(plan) {
+  applyCollapsed(plan);
+  const keep = state.selectedId;
+  state.plan = plan;
+  state.selectedId = plan.tasks.some(t => t.id === keep) ? keep : plan.tasks[0]?.id ?? null;
+  state.undo = [];
+  state.redo = [];
+  render();
+}
+
+// The header links to this project's repository, when we know it: from the page
+// (published site) or from the helper (a clone).
+function showRepoLink(repo) {
+  for (const a of [$('#repo-link'), $('#dr-repo')]) { // header (desktop) and drawer (phone)
+    if (!repo) { a.hidden = true; continue; }
+    a.textContent = a.id === 'dr-repo' ? `${repo.slug} on GitHub ↗` : repo.slug;
+    a.href = repoUrl(repo);
+    a.hidden = false;
+  }
+}
+
+const dataFiles = g => (g?.dirty || []).filter(p => p.startsWith('data/'));
+
+function repoSaveText() {
+  const r = state.repo;
+  const disk = {
+    saved: 'Saved to disk', dirty: 'Unsaved changes…', saving: 'Saving…',
+    error: `<span class="warn-text">⚠ Not saved: ${esc(r.error || 'unknown error')}</span>`,
+    conflict: '<span class="warn-text">⚠ Conflict: choose a version</span>',
+  }[r.state];
+  const g = state.git;
+  if (!g) return disk;
+  const n = dataFiles(g).length;
+  const bits = [esc(g.branch)];
+  if (n) bits.push(`${n} file${n > 1 ? 's' : ''} to commit`);
+  if (g.ahead) bits.push(`${g.ahead} to push`);
+  if (g.behind) bits.push(`${g.behind} to pull`);
+  if (bits.length === 1) bits.push('in sync');
+  return `${disk} · ${bits.join(' · ')}`;
+}
+
+function updateSyncButton() {
+  const g = state.git, b = $('#btn-sync');
+  b.classList.toggle('attention', !!g && (dataFiles(g).length > 0 || g.ahead > 0 || g.behind > 0));
+}
+
+// Git status refreshes run one at a time. A call returns a promise for a refresh
+// that starts after the call, so `await refreshGit()` always sees fresh numbers.
+let gitRun = Promise.resolve(), gitPending = null;
+function refreshGit(full = true) {
+  if (!state.repo) return Promise.resolve();
+  if (gitPending && (gitPending.full || !full)) return gitPending.promise; // a queued refresh already covers this one
+  const job = { full };
+  job.promise = gitRun.then(async () => {
+    if (gitPending === job) gitPending = null;
+    try { state.git = await state.repo.api.status(job.full); } catch { /* keep the last known status */ }
+    if (state.sched) renderStatus();
+    updateSyncButton();
+    showRepoLink(parseSlug(state.git?.repo));
+  });
+  gitPending = job;
+  gitRun = job.promise;
+  return job.promise;
+}
+
+function onRepoState(st) {
+  if (state.sched) renderStatus();
+  if (st === 'conflict') showDiskConflict();
+  if (st === 'error') toast(`Could not save: ${state.repo.error}`, 'error');
+  if (st === 'saved') refreshGit(false);
+}
+
+function showProblem(title, text, { reload = false } = {}) {
+  $('#problem-title').textContent = title;
+  $('#problem-body').textContent = text;
+  $('#btn-problem-reload').hidden = !reload;
+  const dlg = $('#dlg-problem');
+  if (!dlg.open) dlg.showModal();
+}
+
+// A task named in a data/ path, for messages.
+function taskLabel(path, ...sources) {
+  if (path === 'data/plan.json') return 'Plan settings';
+  for (const files of sources) {
+    try { const name = JSON.parse(files[path]).name; if (name) return name; } catch { /* next */ }
+  }
+  return path.replace('data/tasks/', '').replace('.json', '');
+}
+
+function showDiskConflict() {
+  const { mine, theirs, paths } = state.repo.conflict;
+  const name = (files, p) => { try { return JSON.parse(files[p]).name || '(unnamed)'; } catch { return '(deleted)'; } };
+  $('#conflict-list').innerHTML = paths.map(p => `
+    <li class="conflict-item"><b>${esc(taskLabel(p, mine, theirs))}</b>
+      <span class="side">Yours: ${esc(name(mine, p))}</span><span class="side">Other: ${esc(name(theirs, p))}</span></li>`).join('');
+  const dlg = $('#dlg-conflict');
+  if (!dlg.open) dlg.showModal();
+}
+
+function lockUI(on) {
+  state.locked = on;
+  document.body.classList.toggle('syncing', on);
+  const b = $('#btn-sync');
+  b.disabled = on;
+  b.textContent = on ? 'Syncing…' : 'Sync';
+  if (on) document.activeElement?.blur?.();
+}
+
+function defaultCommitMessage(files) {
+  const tasks = files.filter(p => p.startsWith('data/tasks/')).length;
+  const parts = [];
+  if (files.includes('data/plan.json')) parts.push('plan settings');
+  if (tasks) parts.push(`${tasks} task${tasks > 1 ? 's' : ''}`);
+  return `Update ${parts.join(' and ') || 'plan'}`;
+}
+
+async function startSync() {
+  const s = state.repo, btn = $('#btn-sync');
+  if (!s || state.locked || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = 'Checking…'; // saving and asking GitHub what is new can take a moment
+  let g, files;
+  try {
+    try { await s.flush(); } catch (e) { return toast(e.message, 'error'); }
+    if (s.state !== 'saved') return;
+    await refreshGit(true);
+    g = state.git;
+    if (!g) return toast('Could not read the git status.', 'error');
+    files = dataFiles(g);
+  } finally {
+    if (!state.locked) { btn.disabled = false; btn.textContent = 'Sync'; }
+  }
+  if (!files.length) { // nothing to commit: only pull and/or push
+    if (!g.ahead && !g.behind) return toast('Already in sync with GitHub.');
+    return runSync('Sync');
+  }
+  $('#sync-summary').textContent = `${files.length} changed file${files.length > 1 ? 's' : ''} will be committed on branch ${g.branch}`
+    + (g.behind ? `; ${g.behind} commit${g.behind > 1 ? 's' : ''} from your teammates will be pulled in.` : '.');
+  const f = $('#sync-form');
+  f.message.value = defaultCommitMessage(files);
+  $('#dlg-sync').showModal();
+  f.message.select();
+}
+
+async function runSync(message) {
+  const s = state.repo;
+  const behind = state.git?.behind || 0;
+  lockUI(true);
+  try {
+    const r = await s.sync(message.trim() || 'Sync');
+    if (r.status === 'ok') {
+      toast(`Synced with GitHub${behind ? `; pulled ${behind} new commit${behind > 1 ? 's' : ''}` : ''}.`);
+    } else if (r.status === 'conflict') {
+      await startMerge();
+    } else if (r.status === 'error') {
+      showProblem('Sync did not complete', r.message);
+    }
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    lockUI(false);
+    refreshGit(true);
+  }
+}
+
+// ---- resolving a conflict with a teammate ----
+
+let mergeState = null;
+
+function taskName(id) { return state.plan.tasks.find(t => t.id === id)?.name || id; }
+
+// How a field's value reads to a person.
+function describeValue(c, v) {
+  if (c.field === '*') return v ? `Keep the task “${v.name || '(unnamed)'}”` : 'Delete the task';
+  if (v === undefined || v === null) return c.key !== undefined ? 'Remove it' : '(empty)';
+  switch (c.field) {
+    case 'preds': return `${taskName(v.id)}, ${{ FS: 'finish-to-start', SS: 'start-to-start', FF: 'finish-to-finish' }[v.type] || v.type}`;
+    case 'holidays': return `${v.date}${v.label ? ' ' + v.label : ''}`;
+    case 'duration': return `${v} day${v === 1 ? '' : 's'}`;
+    case 'pct': return `${v}%`;
+    case 'nearCritical': return v === 0 ? 'off' : `${v} working day${v === 1 ? '' : 's'} of float or less`;
+    case 'level': return v === 0 ? 'top level' : `indented ${v} level${v > 1 ? 's' : ''}`;
+    case 'rank': return 'moved to a different place';
+    case 'manualStart': return v || '(not pinned)';
+    case 'satOff': case 'sunOff': case 'showGantt': case 'showPert': return v ? 'yes' : 'no';
+    default: return String(v) === '' ? '(empty)' : String(v);
+  }
+}
+
+function clashLabel(c) {
+  if (c.field === '*') return 'The task was deleted by one of you and changed by the other';
+  if (c.field === 'preds') return `Predecessor “${taskName(c.key)}”`;
+  if (c.field === 'holidays') return `Holiday ${c.key}`;
+  return c.label;
+}
+
+function renderMergeDialog(m) {
+  $('#merge-body').innerHTML = m.items.filter(a => a.conflicts.length).map((a, i) => `
+    <section class="merge-item">
+      <h3>${esc(a.title)}</h3>
+      ${a.auto ? `<p class="hint">${a.auto} other change${a.auto > 1 ? 's' : ''} merged automatically.</p>` : ''}
+      ${a.conflicts.map((c, j) => `
+        <fieldset class="clash" data-path="${esc(a.path)}" data-cid="${esc(c.id)}">
+          <legend>${esc(clashLabel(c))}</legend>
+          <label class="check"><input type="radio" name="m${i}_${j}" value="ours"> <span><b>Yours</b>: ${esc(describeValue(c, c.ours))}</span></label>
+          <label class="check"><input type="radio" name="m${i}_${j}" value="theirs"> <span><b>Theirs</b>: ${esc(describeValue(c, c.theirs))}</span></label>
+        </fieldset>`).join('')}
+    </section>`).join('');
+  $('#btn-merge-finish').disabled = true;
+}
+
+function mergeChoices() {
+  const choices = {}, sets = [...document.querySelectorAll('#merge-body fieldset.clash')];
+  let complete = true;
+  for (const fs of sets) {
+    const picked = fs.querySelector('input:checked')?.value;
+    if (!picked) { complete = false; continue; }
+    (choices[fs.dataset.path] ||= {})[fs.dataset.cid] = picked;
+  }
+  return { choices, complete };
+}
+
+async function startMerge() {
+  let m;
+  try { m = await state.repo.beginMerge(); } catch (e) { return showProblem('Sync did not complete', e.message); }
+  if (m.unresolvable.length) {
+    const names = m.unresolvable.map(p => `• ${p.startsWith('data/') ? taskLabel(p, state.repo.base) : p}`).join('\n');
+    return showProblem('This conflict cannot be resolved in the app',
+      `These files conflict and are not plan data the app can merge:\n${names}\n\nResolve them in the terminal (git pull, fix the files, git commit), then reload this page.`);
+  }
+  if (!m.items.some(a => a.conflicts.length)) return completeMerge(m, {}); // everything merges by itself
+  mergeState = m;
+  renderMergeDialog(m);
+  $('#dlg-merge').showModal();
+}
+
+async function completeMerge(m, choices) {
+  lockUI(true);
+  try {
+    const r = await state.repo.finishMerge(m, choices, 'Merge teammate changes');
+    if (r.status === 'ok') toast('Merged your teammate’s changes and pushed.');
+    else if (r.status === 'changed') showProblem('The remote changed again', 'Someone pushed while you were deciding. Nothing was changed. Press Sync again to see the new differences.');
+    else showProblem('The merge did not complete', r.message);
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    mergeState = null;
+    lockUI(false);
+    refreshGit(true);
+  }
+}
+
+// ---- the published site, with a read-only plan the owner opted in to publish ----
+
+function openViewer(bundle, repo) {
+  document.body.classList.add('viewer');
+  openPlan(applyCollapsed(bundle.plan), { readOnly: true });
+  $('#readonly-banner').hidden = true; // that banner is for share links
+  const when = bundle.generated ? ` on ${new Date(bundle.generated).toLocaleDateString()}` : '';
+  const at = bundle.commit ? ` (version ${bundle.commit})` : '';
+  $('#viewer-text').innerHTML = `You are viewing a <strong>read-only copy</strong> of the project plan, as last published${esc(when)}${esc(at)}.`;
+  $('#viewer-banner').hidden = false;
+  if (repo) {
+    const b = $('#btn-viewer-edit');
+    b.hidden = $('#dr-viewer-edit').hidden = false;
+    b.onclick = () => window.open(codespacesUrl(repo), '_blank', 'noopener');
+  }
+}
+
+async function initRepo(token) {
+  const session = new RepoSession(new RepoApi(token), { getPlan: () => state.plan, adopt: adoptPlan, onState: onRepoState });
+  state.repo = session;
+  let plan, created = false;
+  try {
+    plan = await session.load();
+    if (!plan) { // a clone with no plan yet: start this project's plan
+      plan = store.newPlan();
+      await session.create(plan);
+      created = true;
+    }
+  } catch (e) {
+    // Never fall back to browser storage here: that would quietly fork the plan.
+    openPlan(store.newPlan(), { readOnly: true });
+    $('#readonly-banner').hidden = true;
+    return showProblem('Cannot open this project', e.message, { reload: true });
+  }
+  document.body.classList.add('repo-mode');
+  $('#btn-sync').hidden = $('#dr-sync').hidden = false;
+  openPlan(applyCollapsed(plan));
+  if (created) showSettings();
+  refreshGit(true);
+  setInterval(() => { if (!document.hidden) refreshGit(true); }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) session.flush().catch(() => {});
+    else session.refresh().catch(() => {}).then(() => refreshGit(true));
+  });
+  window.addEventListener('beforeunload', e => {
+    if (session.state !== 'saved') { e.preventDefault(); e.returnValue = ''; }
+  });
 }
 
 // ---------- rendering ----------
@@ -451,7 +783,7 @@ function renderStatus() {
     `<span><b>${leaves.length}</b> tasks, <span class="crit-text">${crit} critical</span>${near ? `, <span class="near-text">${near} near-critical</span>` : ''}</span>`,
     `<span><b>${done}%</b> complete</span>`,
     issues ? `<span class="warn-text">⚠ ${issues} warning${issues > 1 ? 's' : ''}</span>` : '',
-    `<span class="save-state">${state.readOnly ? 'Read-only' : 'Saved in this browser'}</span>`,
+    `<span class="save-state">${state.readOnly ? 'Read-only' : state.repo ? repoSaveText() : 'Saved in this browser'}</span>`,
   ].join('');
   $('#dr-status').innerHTML = $('#status').innerHTML;
 }
@@ -625,7 +957,7 @@ function runCommand(cmd) {
     case 'insert': {
       let newId;
       commit(plan => {
-        newId = plan.nextId++;
+        newId = store.newTaskId(plan);
         const t = store.blankTask(newId);
         if (i < 0) { plan.tasks.push(t); return; }
         const sel = plan.tasks[i];
@@ -823,6 +1155,29 @@ async function exportPNG() {
   }
 }
 
+// In a project repository an imported file replaces the project's plan (git keeps the old
+// version, and Undo works). A CSV carries only tasks, so the project's own name, holidays and
+// settings are kept; a JSON file is a whole plan and replaces everything but the plan's id.
+function replaceProjectPlan(plan, { source, tasksOnly }) {
+  const cur = state.plan;
+  if (tasksOnly) {
+    Object.assign(plan, { name: cur.name, holidays: cur.holidays, satOff: cur.satOff, sunOff: cur.sunOff, showGantt: cur.showGantt, showPert: cur.showPert, nearCritical: cur.nearCritical });
+  }
+  const question = tasksOnly
+    ? `Replace all ${cur.tasks.length} tasks in this project with the ${plan.tasks.length} from ${source}?\n\nThe project name, holidays and settings are kept. Git keeps the previous version, and Undo is available.`
+    : `Replace this project's plan with “${plan.name}” from ${source}?\n\nGit keeps the previous version, and Undo is available.`;
+  if (!confirm(question)) return false;
+  plan.id = cur.id;
+  state.undo.push(JSON.stringify(cur));
+  state.redo = [];
+  state.plan = plan;
+  state.selectedId = plan.tasks[0]?.id ?? null;
+  applyCollapsed(plan);
+  persist();
+  render({ scrollGantt: true });
+  return true;
+}
+
 async function importFile(file) {
   const text = await file.text();
   // Go by content rather than the menu item, so a mislabelled file still opens
@@ -830,6 +1185,10 @@ async function importFile(file) {
   if (!isJSON) return importCSV(file, text);
   try {
     const plan = store.normalize(JSON.parse(text));
+    if (state.repo) {
+      if (replaceProjectPlan(plan, { source: `“${file.name}”`, tasksOnly: false })) toast(`Replaced the plan with “${plan.name}”.`);
+      return;
+    }
     if (store.listPlans().some(p => p.id === plan.id)) {
       if (!confirm(`A plan with this ID (“${store.loadPlan(plan.id)?.name}”) already exists in this browser.\n\nOK = replace it with the file\nCancel = keep both (import as a copy)`)) {
         plan.id = store.uid();
@@ -850,9 +1209,15 @@ function importCSV(file, text) {
     const name = file.name.replace(/\.[^.]+$/, '') || 'Imported plan';
     const { plan: raw, warnings } = csvToPlan(text, { name, parsePreds: parsePredList, isoDate: csvDate });
     const plan = store.normalize(raw);
+    const n = plan.tasks.length;
+    if (state.repo) {
+      if (replaceProjectPlan(plan, { source: `“${file.name}”`, tasksOnly: true })) {
+        toast(`Replaced the tasks with ${n} from “${file.name}”.${warnings.length ? ` Note: ${warnings.join('; ')}.` : ''} Start date comes from the file; check Settings.`, warnings.length ? 'error' : '');
+      }
+      return;
+    }
     store.savePlan(plan);
     openPlan(plan);
-    const n = plan.tasks.length;
     toast(`Imported ${n} task${n === 1 ? '' : 's'} from “${file.name}” as a new plan.`
       + (warnings.length ? ` Note: ${warnings.join('; ')}.` : '')
       + ' Holidays and weekend settings are not in a CSV; check Settings.', warnings.length ? 'error' : '');
@@ -887,12 +1252,12 @@ function wireEvents() {
 
   tbody.addEventListener('focusin', e => {
     const tr = e.target.closest('tr[data-id]');
-    if (tr) select(Number(tr.dataset.id));
+    if (tr) select(tr.dataset.id);
   });
   tbody.addEventListener('click', e => {
     const tr = e.target.closest('tr[data-id]');
     if (!tr) return;
-    const id = Number(tr.dataset.id);
+    const id = tr.dataset.id;
     select(id);
     if (e.target.closest('[data-act="toggle"]') && e.detail < 2) toggleCollapse(id);
     if (e.target.closest('[data-act="unpin"]')) {
@@ -904,7 +1269,7 @@ function wireEvents() {
     const input = e.target;
     if (!input.matches?.('input[data-f]') || input.readOnly) return;
     if (input.value === input.dataset.orig) return;
-    const id = Number(input.closest('tr').dataset.id);
+    const id = input.closest('tr').dataset.id;
     const { f } = input.dataset;
     const { value } = input;
     input.dataset.orig = value;
@@ -937,19 +1302,19 @@ function wireEvents() {
   attachReorder($('#table-pane'), {
     ...dragOpts,
     grip: '.c-num',
-    rows: () => [...document.querySelectorAll('#tbody tr[data-id]')].map(el => ({ id: Number(el.dataset.id), el })),
+    rows: () => [...document.querySelectorAll('#tbody tr[data-id]')].map(el => ({ id: el.dataset.id, el })),
   });
   attachReorder($('#gantt-pane'), {
     ...dragOpts,
     grip: '.g-row, .g-task, .g-row-bg',
-    rows: () => [...document.querySelectorAll('#gantt-pane .g-row .g-row-bg')].map(el => ({ id: Number(el.parentNode.dataset.id), el })),
+    rows: () => [...document.querySelectorAll('#gantt-pane .g-row .g-row-bg')].map(el => ({ id: el.parentNode.dataset.id, el })),
   });
 
   $('#gantt-pane').addEventListener('click', e => {
     const el = e.target.closest('[data-id]');
     if (!el) return;
-    select(Number(el.dataset.id));
-    if (e.target.closest('[data-act="toggle"]') && e.detail < 2) toggleCollapse(Number(el.dataset.id));
+    select(el.dataset.id);
+    if (e.target.closest('[data-act="toggle"]') && e.detail < 2) toggleCollapse(el.dataset.id);
   });
   // Double-clicking a summary row collapses or expands it (in either view);
   // on the triangle itself the first click already did that (the second is
@@ -957,15 +1322,15 @@ function wireEvents() {
   const dblToggle = e => {
     if (e.target.closest('[data-act="toggle"]')) return true;
     const el = e.target.closest('[data-id]');
-    if (!el || !state.sched.byId.get(Number(el.dataset.id))?.summary) return false;
-    toggleCollapse(Number(el.dataset.id));
+    if (!el || !state.sched.byId.get(el.dataset.id)?.summary) return false;
+    toggleCollapse(el.dataset.id);
     window.getSelection()?.removeAllRanges(); // the double-click also selected a word
     return true;
   };
   tbody.addEventListener('dblclick', dblToggle);
   $('#pert-pane').addEventListener('click', e => {
     const el = e.target.closest('.pt-node');
-    if (el) select(Number(el.dataset.id));
+    if (el) select(el.dataset.id);
   });
   // Double-click: a collapsed group expands (back to the full network);
   // a task opens in the table for editing.
@@ -999,6 +1364,32 @@ function wireEvents() {
   $('#plan-name').addEventListener('click', () => state.readOnly ? null : showSettings());
   $('#btn-settings').addEventListener('click', showSettings);
   $('#btn-plans').addEventListener('click', showPlans);
+  $('#btn-sync').addEventListener('click', startSync);
+  $('#sync-form').addEventListener('submit', e => {
+    if (e.submitter?.value === 'sync') runSync(new FormData(e.target).get('message') || '');
+  });
+  $('#dlg-conflict').addEventListener('cancel', e => e.preventDefault()); // must choose
+  for (const [id, side] of [['#btn-keep-mine', 'mine'], ['#btn-keep-theirs', 'theirs']]) {
+    $(id).addEventListener('click', async () => {
+      $('#dlg-conflict').close();
+      try { await state.repo.resolveConflict(side); } catch (e) { toast(e.message, 'error'); }
+    });
+  }
+  $('#btn-problem-reload').addEventListener('click', () => location.reload());
+  $('#merge-body').addEventListener('change', () => { $('#btn-merge-finish').disabled = !mergeChoices().complete; });
+  $('#btn-merge-finish').addEventListener('click', () => {
+    const { choices, complete } = mergeChoices();
+    if (!complete || !mergeState) return;
+    $('#dlg-merge').close();
+    completeMerge(mergeState, choices);
+  });
+  $('#btn-merge-cancel').addEventListener('click', () => $('#dlg-merge').close());
+  $('#dlg-merge').addEventListener('close', () => {
+    if (mergeState && !state.locked) {
+      mergeState = null;
+      toast('Nothing was merged. Your changes are safe; press Sync to try again.');
+    }
+  });
   $('#btn-export').addEventListener('click', () => {
     store.downloadText(`${store.safeFilename(state.plan.name)}.json`, store.planToJSON(state.plan));
   });
@@ -1113,7 +1504,7 @@ function wireEvents() {
 }
 
 async function loadFromHash() {
-  if (!location.hash.startsWith('#share=')) return false;
+  if (state.repo || !location.hash.startsWith('#share=')) return false; // repo mode never shows other plans
   try {
     const plan = await store.decodeShare(location.hash);
     openPlan(plan, { readOnly: true });
@@ -1134,7 +1525,19 @@ async function init() {
   if (!store.storageAvailable()) {
     toast('Browser storage is unavailable (private mode?). Use Export → JSON file to keep your work.', 'error');
   }
-  if (!(await loadFromHash())) openPlan(loadInitialPlan());
+  const token = repoToken();
+  if (token) return initRepo(token);
+  const repo = pageRepo();
+  showRepoLink(repo);
+  if (await loadFromHash()) return; // an explicit share link wins
+  let bundle = null;
+  try {
+    bundle = await loadBundle(pageBundlePath());
+  } catch (e) {
+    toast(`${e.message} Showing the example planner instead.`, 'error');
+  }
+  if (bundle) return openViewer(bundle, repo);
+  openPlan(loadInitialPlan());
 }
 
 init();

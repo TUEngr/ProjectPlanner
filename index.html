@@ -12,9 +12,11 @@
   <header class="topbar">
     <button id="btn-drawer" class="hamburger compact-only" aria-label="Menu" aria-controls="drawer" aria-expanded="false">☰</button>
     <div class="brand">Project Planner</div>
+    <a id="repo-link" class="repo-link" hidden target="_blank" rel="noopener" title="Open this project's repository on GitHub"></a>
     <button id="plan-name" class="plan-name" title="Plan settings">Untitled</button>
     <span class="ro-chip compact-only readonly-only">Read-only</span>
     <nav class="actions">
+      <button id="btn-sync" class="primary" hidden title="Save, commit your changes, pull your teammates' changes and push to GitHub">Sync</button>
       <button id="btn-plans" title="Open, create, or delete plans">Plans</button>
       <button id="btn-settings" class="edit-only" title="Project start date and holidays">Settings</button>
       <button id="btn-open-menu" class="edit-only" aria-haspopup="menu" aria-expanded="false" aria-controls="open-menu" title="Load a plan from a file">Open ▾</button>
@@ -28,6 +30,11 @@
     <span>You are viewing a <strong>read-only shared copy</strong> of this plan.</span>
     <button id="btn-save-copy" class="primary">Save a copy to my plans</button>
     <button id="btn-close-shared">Close</button>
+  </div>
+
+  <div id="viewer-banner" class="banner" hidden>
+    <span id="viewer-text"></span>
+    <button id="btn-viewer-edit" class="primary" hidden title="Opens this project in a GitHub Codespace, where you can edit it and sync your changes">Open in Codespaces to edit</button>
   </div>
 
   <div class="toolbar">
@@ -89,6 +96,10 @@
       <div class="dr-title"><span>Project Planner</span><button class="dr-close" aria-label="Close menu">✕</button></div>
       <div id="dr-plan" class="dr-plan"></div>
       <div id="dr-status" class="dr-status"></div>
+      <div class="viewer-only dr-viewer">
+        <p>You are viewing a read-only copy of the project plan.</p>
+        <button id="dr-viewer-edit" data-proxy="#btn-viewer-edit" class="primary" hidden>Open in Codespaces to edit</button>
+      </div>
       <div class="readonly-only dr-ro">
         <p>You are viewing a read-only shared copy.</p>
         <button data-proxy="#btn-save-copy" class="primary">Save a copy to my plans</button>
@@ -122,6 +133,7 @@
       </div>
     </section>
     <section class="dr-list">
+      <button id="dr-sync" data-proxy="#btn-sync" class="primary edit-only" hidden>Sync with GitHub…</button>
       <button data-proxy="#btn-plans">Plans…</button>
       <button data-proxy="#btn-settings" class="edit-only">Settings…</button>
     </section>
@@ -144,6 +156,7 @@
     </section>
     <section class="dr-list">
       <button data-proxy="#btn-help">Help</button>
+      <a id="dr-repo" href="#" target="_blank" rel="noopener" hidden></a>
       <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">Bugs &amp; feature requests ↗</a>
     </section>
   </aside>
@@ -215,6 +228,48 @@
     </div>
   </dialog>
 
+  <dialog id="dlg-sync">
+    <form method="dialog" id="sync-form">
+      <h2>Sync with GitHub</h2>
+      <p id="sync-summary" class="hint"></p>
+      <label>Commit message <input name="message" required maxlength="200" autocomplete="off"></label>
+      <p class="hint">Your changes are committed, your teammates' changes are pulled in, then everything is pushed.</p>
+      <div class="dlg-buttons">
+        <button value="sync" class="primary">Sync</button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-conflict">
+    <h2>The same task was changed twice</h2>
+    <p>The plan on disk changed while you were editing (for example after a pull), and these tasks were changed both there and by you. Nothing has been overwritten. Choose which version to keep for them; your other edits are saved either way.</p>
+    <ul id="conflict-list" class="plan-list"></ul>
+    <div class="dlg-buttons">
+      <button id="btn-keep-mine" class="primary">Keep my changes</button>
+      <button id="btn-keep-theirs">Use the other version</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-merge">
+    <h2>Choose between your version and your teammate's</h2>
+    <p>You and a teammate changed the same thing. Everything that does not clash has already been merged. Pick a version for each item below.</p>
+    <div id="merge-body"></div>
+    <div class="dlg-buttons">
+      <button id="btn-merge-finish" class="primary" disabled>Finish merge and push</button>
+      <button id="btn-merge-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-problem">
+    <h2 id="problem-title"></h2>
+    <div id="problem-body"></div>
+    <div class="dlg-buttons">
+      <button id="btn-problem-reload" hidden>Reload page</button>
+      <button value="close" class="close">Close</button>
+    </div>
+  </dialog>
+
   <dialog id="dlg-import-error">
     <h2>Could not import the CSV file</h2>
     <p id="import-error-msg"></p>
@@ -243,8 +298,9 @@
       <li><strong>Critical path</strong> (red) is the chain of tasks with zero float: any slip in them delays the finish. <em>Float</em> is how many working days a task can slip without delaying the project. Links that drive the critical path are drawn in red. <strong>Near-critical</strong> tasks (orange) have a little float, at most the number of working days set in <em>Settings</em> (2 by default; 0 turns it off): they aren't critical yet, but a short slip would make them so. A <em>pinned</em> date can set the project finish by itself: if the work leading to it finishes early, that work has float and isn't red. Its float shows how much margin there is, and raising the near-critical setting colors it orange.</li>
       <li><strong>Gantt chart</strong>: FS arrows run from the end of one bar to the start of the next; SS arrows join the left ends of the bars and FF arrows the right ends. The dark stripe inside a bar is % done, the dashed green line is today, and shaded columns are non-working days. Click a row to select it; double-click a task to edit it in the table (double-clicking a summary collapses it instead).</li>
       <li><strong>Settings</strong> (or click the plan name): rename the plan, set the project start date, list holidays (one <code>YYYY-MM-DD</code> per line with an optional label), choose whether Saturdays and Sundays are non-working days (both are by default; changing these reschedules every task), and choose whether the plan includes the Gantt and PERT views.</li>
-      <li><strong>Plans</strong>: keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
-      <li><strong>Saving</strong>: plans save automatically in this browser only. Use <em>Export → JSON file</em> / <em>Open → JSON file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
+      <li><strong>Project repositories</strong>: when this page was opened from a project's repository (for example in a GitHub Codespace), the plan is not stored in the browser. It is saved automatically to the repository's <code>data</code> folder, and <em>Plans</em> and <em>Export → Read-only link</em> are hidden. Press <em>Sync</em> to commit your changes, pull in your teammates' changes and push. If you and a teammate changed the same thing, a dialog asks which version to keep. The status bar shows what is waiting to be committed, pushed or pulled. <em>Open → JSON file</em> replaces the project's plan, and <em>Open → CSV file</em> replaces its tasks (the name, holidays and settings are kept); you are asked first, git keeps the previous version, and Undo works. Which groups you have collapsed stays in your own browser.</li>
+      <li><strong>Plans</strong> (standalone use): keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
+      <li><strong>Saving</strong> (standalone use): plans save automatically in this browser only. Use <em>Export → JSON file</em> / <em>Open → JSON file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
       <li><strong>Open</strong> menu: <em>JSON file</em> opens a plan saved with Export → JSON file (if that plan is already in this browser you can replace it or keep both). <em>CSV file</em> makes a new plan from a task table, such as one built in Excel or Google Sheets or saved with Export → CSV file. The first row must name the columns; only <strong>Task</strong> (or <strong>Name</strong>) is required. It also reads <em>Outline level</em> (or a <em>WBS</em> number like 1.2), <em>Type</em> (Milestone, Summary), <em>Duration</em>, <em>Predecessors</em> (row numbers such as <code>2, 5SS</code>, matched to a <em>Row</em> column if there is one, otherwise to the line order), <em>% complete</em>, <em>Assignee</em>, <em>Notes</em>, and <em>Pinned start</em>. Start and finish are recalculated; the earliest <em>Start</em> in the file becomes the project start. Dates may be YYYY-MM-DD or M/D/YYYY. Holidays and weekend settings are not in a CSV, so check <em>Settings</em> afterwards. If a file can't be read, you are offered a template CSV to fill in.</li>
       <li><strong>Export</strong> menu:
         <ul>
@@ -259,7 +315,7 @@
 
     </ul>
     <h3>Bugs and feature requests</h3>
-    <p>Report problems and suggest features on the <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">GitHub issues page</a> (a free GitHub account is needed). Search the existing issues first; if yours is already there, add a comment or a 👍 instead of opening a new one. Otherwise click <em>New issue</em> and include:</p>
+    <p>Report problems and suggest features on the planner's <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">GitHub issues page</a> (a free GitHub account is needed). Search the existing issues first; if yours is already there, add a comment or a 👍 instead of opening a new one. Otherwise click <em>New issue</em> and include:</p>
     <ul class="help">
       <li><strong>Bug</strong>: what you did, what you expected, and what happened instead, plus your browser and operating system. A screenshot helps, and so does the plan itself: use <em>Export → JSON file</em> and drag the .json file into the issue.</li>
       <li><strong>Feature request</strong>: what you are trying to do and why. The use case matters more than a specific design.</li>
@@ -267,7 +323,7 @@
     <p class="hint">Issues are public. Don't attach plans that contain private information.</p>
     <h3>What's new</h3>
     <!-- Bump the version here and add an entry to CHANGELOG.md with each release -->
-    <p>Version <strong id="app-version">1.9.1</strong> (2026-10-06). See the <a href="https://github.com/TUEngr/ProjectPlanner/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a> for what changed in each version.</p>
+    <p>Version <strong id="app-version">1.10.0</strong> (2026-10-07). See the <a href="https://github.com/TUEngr/ProjectPlanner/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a> for what changed in each version.</p>
     <div class="dlg-buttons"><button value="close" class="close primary">Close</button></div>
   </dialog>
 

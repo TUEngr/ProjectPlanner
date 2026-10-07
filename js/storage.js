@@ -8,7 +8,9 @@ import { linksOf, nearCriticalDays, NEAR_DEFAULT } from './schedule.js';
 const INDEX_KEY = 'projectplanner.index';
 const PLAN_PREFIX = 'projectplanner.plan.';
 const LAST_KEY = 'projectplanner.last';
-export const FORMAT_VERSION = 1;
+// Rank strings order tasks (see planfiles.js): base-36 digits, no trailing zero.
+export const RANK_RE = /^[0-9a-z]*[1-9a-z]$/;
+export const FORMAT_VERSION = 2;
 
 function lsGet(key) {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -70,15 +72,40 @@ export function nextMonday() {
   return toISO(n);
 }
 
+// Task ids are short random strings so two people adding tasks at the same time
+// never collide. They double as file names (data/tasks/<id>.json), hence the
+// lower-case alphanumeric alphabet.
+export const TASK_ID_RE = /^[a-z0-9]{1,32}$/;
+
+export function newTaskId(plan) {
+  const used = new Set((plan?.tasks || []).map(t => t.id));
+  for (;;) {
+    let id = 't';
+    if (globalThis.crypto?.getRandomValues) {
+      for (const b of crypto.getRandomValues(new Uint8Array(8))) id += (b % 36).toString(36);
+    } else {
+      id += Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+    }
+    if (!used.has(id)) return id;
+  }
+}
+
+// Plans from before string ids used integers: 5 becomes 't5'. Deterministic, so
+// two people migrating the same old plan get identical ids.
+function migrateId(raw) {
+  if (Number.isInteger(raw) && raw > 0) return 't' + raw;
+  if (typeof raw === 'string' && TASK_ID_RE.test(raw)) return raw;
+  return null;
+}
+
 export function blankTask(id) {
-  return { id, name: '', level: 0, duration: 1, preds: [], manualStart: null, pct: 0, assignee: '', notes: '' };
+  return { id, rank: null, name: '', level: 0, duration: 1, preds: [], manualStart: null, pct: 0, assignee: '', notes: '' };
 }
 
 export function newPlan(name = 'Untitled project') {
   return {
     format: FORMAT_VERSION, id: uid(), name, start: nextMonday(), holidays: [], satOff: true, sunOff: true, showGantt: true, showPert: true, nearCritical: NEAR_DEFAULT,
-    tasks: [{ ...blankTask(1), name: 'First task', duration: 5 }],
-    nextId: 2,
+    tasks: [{ ...blankTask(newTaskId()), name: 'First task', duration: 5 }],
   };
 }
 
@@ -90,16 +117,20 @@ export function normalize(obj) {
   }
   const start = parseISO(obj.start) !== null ? obj.start : nextMonday();
   const ids = new Set();
-  const tasks = obj.tasks.map((t, i) => {
-    let id = Number.isInteger(t.id) && t.id > 0 && !ids.has(t.id) ? t.id : null;
-    if (id === null) id = -(i + 1); // fixed below
+  const tasks = obj.tasks.map(t => {
+    let id = migrateId(t.id);
+    if (id === null || ids.has(id)) id = newTaskId({ tasks: [...ids].map(x => ({ id: x })) });
     ids.add(id);
     return {
       id,
+      rank: typeof t.rank === 'string' && RANK_RE.test(t.rank) ? t.rank : null,
       name: String(t.name ?? ''),
       level: Math.max(0, Math.min(20, Number(t.level) | 0)),
       duration: Math.max(0, Math.round(Number(t.duration) || 0)),
-      preds: Array.isArray(t.preds) ? linksOf(t) : [], // bare ids from older plans become FS links
+      // Bare ids from older plans become FS links; ids are migrated like task ids.
+      preds: Array.isArray(t.preds)
+        ? linksOf(t).map(l => ({ id: migrateId(l.id), type: l.type })).filter(l => l.id !== null)
+        : [],
       manualStart: t.manualStart && parseISO(t.manualStart) !== null ? t.manualStart : null,
       collapsed: t.collapsed === true,
       pct: Math.max(0, Math.min(100, Math.round(Number(t.pct) || 0))),
@@ -107,8 +138,6 @@ export function normalize(obj) {
       notes: String(t.notes ?? ''),
     };
   });
-  let next = Math.max(0, ...tasks.map(t => t.id)) + 1;
-  for (const t of tasks) if (t.id < 0) t.id = next++;
   fixLevels(tasks);
   return {
     format: FORMAT_VERSION,
@@ -124,7 +153,6 @@ export function normalize(obj) {
     showPert: obj.showPert !== false,
     nearCritical: nearCriticalDays(obj), // plans without one get the default
     tasks,
-    nextId: Math.max(next, Number(obj.nextId) || 0),
     updated: obj.updated,
   };
 }

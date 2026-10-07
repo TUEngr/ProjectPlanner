@@ -1,0 +1,59 @@
+# Publishes the app (and, only if you opt in, a read-only view of the plan) to this
+# repository's own GitHub Pages address: https://<owner>.github.io/<repo>/
+#
+# One-time setup per repository: Settings > Pages > Source: GitHub Actions.
+# Until then this workflow finishes green and leaves a notice saying so.
+#
+# Opt-in plan publishing: add a repository variable PUBLISH_PLAN with the value
+# true (Settings > Secrets and variables > Actions > Variables). A Pages site is
+# public, even when the repository is private, so only do this for plans that
+# may be public.
+name: Publish site
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that GitHub Pages is switched on
+        id: check
+        run: bash .github/scripts/pages-status.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Assemble the site
+        if: steps.check.outputs.enabled == 'true'
+        run: bash .github/scripts/build-site.sh _site
+        env:
+          PUBLISH_PLAN: ${{ vars.PUBLISH_PLAN }}
+      - name: Upload the site
+        if: steps.check.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

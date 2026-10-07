@@ -6,7 +6,8 @@
 //   RepoSession  keeps memory and disk in step: debounced saves, merging when
 //                the disk changed underneath (git pull, another tab), and sync
 
-import { planToFiles, planFromFiles, sameFiles, mergeFiles } from './planfiles.js';
+import { planToFiles, planFromFiles, sameFiles, mergeFiles, isPlanPath } from './planfiles.js';
+import { analyze, finish } from './merge.js';
 
 export class RepoError extends Error {
   constructor(kind, message) { super(message); this.kind = kind; }
@@ -60,6 +61,21 @@ export class RepoApi {
     const { status, body } = await this.call('GET', '/api/git/status' + (fetch ? '' : '?fetch=0'));
     if (status !== 200) throw new RepoError('error', body?.error || `Could not read git status (${status}).`);
     return body;
+  }
+
+  // The three versions (base / ours / theirs) of each file that conflicts with the upstream branch.
+  async conflicts() {
+    const { status, body } = await this.call('POST', '/api/git/conflicts', {});
+    if (status !== 200) throw new RepoError('error', body?.error || `Could not read the conflicts (${status}).`);
+    return body; // { ours, theirs, entries: { path: { base, ours, theirs } } }
+  }
+
+  // -> { ok: true, status } | { changed: true } | { error }
+  async resolve(request) {
+    const { status, body } = await this.call('POST', '/api/git/resolve', request);
+    if (status === 200) return { ok: true, status: body };
+    if (status === 409 && body?.error === 'changed') return { changed: true };
+    return { error: [body?.error, body?.detail].filter(Boolean).join(': ') || `Could not finish the merge (${status}).` };
   }
 
   // -> { ok: true, status } | { conflict: true, files } | { error }
@@ -192,6 +208,36 @@ export class RepoSession {
     this.base = latest.files;
     if (latest.exists) this.adopt(planFromFiles(latest.files));
     return true;
+  }
+
+  // After a Sync that hit a git conflict: work out, file by file, what merges by
+  // itself and what needs a decision. Nothing is changed on disk yet.
+  // -> { ours, theirs, items: [analysis], unresolvable: [path] }
+  async beginMerge() {
+    const c = await this.api.conflicts();
+    const items = [], unresolvable = [];
+    for (const [path, e] of Object.entries(c.entries || {})) {
+      if (!isPlanPath(path)) { unresolvable.push(path); continue; }
+      const a = analyze(path, e);
+      if (a.kind === 'raw') unresolvable.push(path); else items.push(a);
+    }
+    return { ours: c.ours, theirs: c.theirs, items, unresolvable };
+  }
+
+  // choices: { [path]: { [conflictId]: 'ours' | 'theirs' } }
+  // -> { status: 'ok', git } | { status: 'changed' } | { status: 'error', message }
+  async finishMerge(m, choices = {}, message = 'Merge teammate changes') {
+    const files = {};
+    for (const a of m.items) files[a.path] = finish(a, choices[a.path] || {});
+    const r = await this.api.resolve({ ours: m.ours, theirs: m.theirs, files, message });
+    if (r.changed) return { status: 'changed' };
+    if (r.error) return { status: 'error', message: r.error };
+    const latest = await this.api.plan(); // disk now holds the merge
+    this.rev = latest.rev;
+    this.base = latest.files;
+    if (latest.exists) this.adopt(planFromFiles(latest.files));
+    this._set('saved');
+    return { status: 'ok', git: r.status };
   }
 
   // Save, then commit + pull + push, then show whatever was pulled.

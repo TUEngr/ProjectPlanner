@@ -32,6 +32,15 @@ class FakeApi {
   }
   // Someone else (a pull, another tab) changes the disk.
   external(mutator) { const f = { ...this.files }; mutator(f); this.files = f; this.n++; }
+  async conflicts() { return this.conflictData; }
+  async resolve(req) {
+    this.resolveCalls = (this.resolveCalls || []).concat([req]);
+    if (this.resolveResult) return this.resolveResult;
+    const f = { ...this.files };
+    for (const [p, t] of Object.entries(req.files)) { if (t === null) delete f[p]; else f[p] = t; }
+    this.files = f; this.n++;
+    return { ok: true, status: { ahead: 0, behind: 0 } };
+  }
   async sync(message) { this.syncs.push({ message, filesAtSync: { ...this.files } }); return this.syncResult || { ok: true, status: { ahead: 0, behind: 0 } }; }
 }
 
@@ -288,6 +297,78 @@ test('session: if the helper is unreachable the state is error, and the next sav
   await session.flush();
   eq(session.state, 'saved');
   ok(api.files[taskFile(env.plan, 1)].includes('offline edit'), 'edit saved after recovery');
+});
+
+// ---- conflict resolution through the session ----
+
+const taskText = (plan, i, over = {}) => { const t = { ...plan.tasks[i], ...over }; return planToFiles({ ...plan, tasks: [t] })[`${TASK_DIR}${t.id}.json`]; };
+
+test('session: beginMerge sorts conflicts into those it can ask about and those it cannot', async () => {
+  const plan = samplePlan(); const path = taskFile(plan, 2);
+  const { api, session } = await started(plan);
+  api.conflictData = { ours: 'a'.repeat(40), theirs: 'b'.repeat(40), entries: {
+    [path]: { base: taskText(plan, 2), ours: taskText(plan, 2, { name: 'Mine' }), theirs: taskText(plan, 2, { name: 'Theirs', duration: 9 }) },
+    'js/code.js': { base: 'x', ours: 'y', theirs: 'z' },
+    [taskFile(plan, 3)]: { base: taskText(plan, 3), ours: 'not json', theirs: taskText(plan, 3) },
+  } };
+  const m = await session.beginMerge();
+  eq(m.items.map(a => a.path), [path]);
+  eq(m.items[0].conflicts.map(c => c.id), ['name']);
+  eq(m.items[0].auto, 1, 'their duration change merges without asking');
+  eq(m.unresolvable.sort(), ['js/code.js', taskFile(plan, 3)].sort());
+});
+
+test('session: finishMerge sends one resolved file per conflict, with each file’s own choices, and shows the result', async () => {
+  const plan = samplePlan(); const p1 = taskFile(plan, 2), p2 = taskFile(plan, 5);
+  const { api, env, session } = await started(plan);
+  api.conflictData = { ours: 'a'.repeat(40), theirs: 'b'.repeat(40), entries: {
+    [p1]: { base: taskText(plan, 2), ours: taskText(plan, 2, { name: 'P1 mine' }), theirs: taskText(plan, 2, { name: 'P1 theirs', duration: 9 }) },
+    [p2]: { base: taskText(plan, 5), ours: taskText(plan, 5, { name: 'P2 mine' }), theirs: taskText(plan, 5, { name: 'P2 theirs' }) },
+  } };
+  const m = await session.beginMerge();
+  const r = await session.finishMerge(m, { [p1]: { name: 'theirs' }, [p2]: { name: 'ours' } }, 'Merge it');
+  eq(r.status, 'ok');
+  const req = api.resolveCalls[0];
+  eq([req.ours, req.theirs, req.message], ['a'.repeat(40), 'b'.repeat(40), 'Merge it']);
+  eq(Object.keys(req.files).sort(), [p1, p2].sort());
+  const disk = planFromFiles(api.files);
+  eq([disk.tasks[2].name, disk.tasks[2].duration, disk.tasks[5].name], ['P1 theirs', 9, 'P2 mine']);
+  eq([env.plan.tasks[2].name, session.state], ['P1 theirs', 'saved']);
+});
+
+test('session: a deleted-vs-edited task resolves to null (delete) or the edited text', async () => {
+  const plan = samplePlan(); const path = taskFile(plan, 4);
+  const { api, env, session } = await started(plan);
+  api.conflictData = { ours: 'a'.repeat(40), theirs: 'b'.repeat(40), entries: { [path]: { base: taskText(plan, 4), ours: null, theirs: taskText(plan, 4, { name: 'edited' }) } } };
+  const m = await session.beginMerge();
+  eq(m.items[0].conflicts.map(c => c.id), ['*']);
+  await session.finishMerge(m, { [path]: { '*': 'ours' } });
+  eq(api.resolveCalls[0].files[path], null);
+  ok(!env.plan.tasks.some(t => t.id === plan.tasks[4].id), 'deleted task gone from the page');
+});
+
+test('session: finishMerge reports a moved remote and errors without touching the page', async () => {
+  const plan = samplePlan(); const path = taskFile(plan, 2);
+  const { api, env, session } = await started(plan);
+  api.conflictData = { ours: 'a'.repeat(40), theirs: 'b'.repeat(40), entries: { [path]: { base: taskText(plan, 2), ours: taskText(plan, 2, { name: 'm' }), theirs: taskText(plan, 2, { name: 't' }) } } };
+  const m = await session.beginMerge();
+  const before = JSON.stringify(env.plan);
+  api.resolveResult = { changed: true };
+  eq(await session.finishMerge(m, {}), { status: 'changed' });
+  api.resolveResult = { error: 'push failed: denied' };
+  eq(await session.finishMerge(m, {}), { status: 'error', message: 'push failed: denied' });
+  eq(JSON.stringify(env.plan), before);
+});
+
+test('api: conflicts and resolve map their responses', async () => {
+  eq(await new RepoApi('t', fakeFetch(200, { ours: 'a', theirs: 'b', entries: {} })).conflicts(), { ours: 'a', theirs: 'b', entries: {} });
+  eq(await new RepoApi('t', fakeFetch(409, { error: 'changed' })).resolve({}), { changed: true });
+  eq(await new RepoApi('t', fakeFetch(409, { error: 'resolution does not match the conflicts' })).resolve({}), { error: 'resolution does not match the conflicts' });
+  eq(await new RepoApi('t', fakeFetch(502, { error: 'push failed', detail: 'no' })).resolve({}), { error: 'push failed: no' });
+  eq((await new RepoApi('t', fakeFetch(200, { ahead: 0 })).resolve({})).ok, true);
+  let threw = false;
+  try { await new RepoApi('t', fakeFetch(400, { error: 'no upstream' })).conflicts(); } catch { threw = true; }
+  ok(threw, 'conflicts() should throw on an error response');
 });
 
 // ---- RepoApi ----

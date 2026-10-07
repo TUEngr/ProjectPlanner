@@ -174,7 +174,7 @@ def put_plan(body):
 def git(*args, check=False):
     """Run git in the repo with a fixed argument list (never a shell string)."""
     return subprocess.run(
-        ['git', *args], cwd=ROOT, capture_output=True, text=True,
+        ['git', *args], cwd=ROOT, capture_output=True, text=True, encoding='utf-8', errors='replace',
         timeout=GIT_TIMEOUT, check=check,
         env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'},
     )
@@ -231,6 +231,119 @@ def _git_sync(message):
     if r.returncode != 0:
         return 502, {'error': 'push failed', 'detail': r.stderr.strip()}
     return 200, git_status(fetch=False)
+
+
+# ---- Resolving a merge conflict inside the app ----
+# Stateless on purpose: the repo is never left mid-merge. /conflicts does a trial
+# merge, reads the three versions of each conflicted file, and aborts. /resolve
+# redoes the merge, writes the user's resolution, commits and pushes, but only if
+# neither branch tip moved since /conflicts looked.
+
+SHA_RE = re.compile(r'^[0-9a-f]{40,64}$')
+
+
+def _rev(ref):
+    r = git('rev-parse', '--verify', '-q', ref)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _unmerged():
+    out = git('diff', '--name-only', '-z', '--diff-filter=U').stdout
+    return sorted(p for p in out.split('\0') if p)
+
+
+def _abort_merge():
+    git('merge', '--abort')  # harmless when no merge is in progress
+
+
+def git_conflicts():
+    """Versions of every file that conflicts when merging the upstream branch."""
+    with LOCK:
+        head, up = _rev('HEAD'), _rev('@{u}')
+        if not head or not up:
+            raise ApiError(400, {'error': 'this branch has no upstream to merge with'})
+        git('merge', '--no-commit', '--no-ff', '@{u}')
+        try:
+            entries = {}
+            for path in _unmerged():
+                entry = {}
+                for stage, name in ((1, 'base'), (2, 'ours'), (3, 'theirs')):
+                    r = git('show', f':{stage}:{path}')
+                    entry[name] = r.stdout if r.returncode == 0 else None
+                entries[path] = entry
+        finally:
+            _abort_merge()
+        return {'ours': head, 'theirs': up, 'entries': entries}
+
+
+def git_resolve(body):
+    """Finish the merge with the user's resolution for every conflicted file, then push."""
+    if not isinstance(body, dict):
+        raise ApiError(400, {'error': 'expected an object'})
+    ours, theirs, files, message = (body.get(k) for k in ('ours', 'theirs', 'files', 'message'))
+    if not (isinstance(ours, str) and SHA_RE.match(ours) and isinstance(theirs, str) and SHA_RE.match(theirs)):
+        raise ApiError(400, {'error': 'ours and theirs must be commit ids'})
+    if not isinstance(files, dict):
+        raise ApiError(400, {'error': 'files must be an object'})
+    if not isinstance(message, str) or not message.strip() or len(message) > 500:
+        raise ApiError(400, {'error': 'message required (1-500 chars)'})
+    for path, text in files.items():
+        if not plan_path_ok(path):
+            raise ApiError(400, {'error': f'path not allowed: {path}'})
+        if text is None:
+            continue
+        try:
+            ok = isinstance(text, str) and len(text.encode()) <= MAX_PLAN_FILE and isinstance(json.loads(text), dict)
+        except ValueError:
+            ok = False
+        if not ok:
+            raise ApiError(400, {'error': f'{path}: must be a JSON object'})
+
+    with LOCK:
+        try:
+            git('fetch', '--quiet')  # notice a remote that moved while the user was deciding
+        except subprocess.TimeoutExpired:
+            pass
+        if _rev('HEAD') != ours or _rev('@{u}') != theirs:
+            raise ApiError(409, {'error': 'changed'})  # someone pushed again; look at the conflicts again
+        git('merge', '--no-commit', '--no-ff', '@{u}')
+        done = False
+        try:
+            unmerged = _unmerged()
+            if sorted(files) != unmerged:
+                raise ApiError(409, {'error': 'resolution does not match the conflicts', 'unmerged': unmerged})
+            if not all(plan_path_ok(p) for p in unmerged):
+                raise ApiError(409, {'error': 'only plan files can be resolved here', 'unmerged': unmerged})
+            for path, text in files.items():
+                full = os.path.join(ROOT, path)
+                if os.path.islink(full):
+                    raise ApiError(400, {'error': f'{path} is a symlink'})
+                if text is None:
+                    git('rm', '-q', '-f', '--ignore-unmatch', '--', path)
+                    if os.path.lexists(full):
+                        os.remove(full)
+                    continue
+                if _plain_dir('data/tasks') is None and path.startswith('data/tasks/'):
+                    os.makedirs(os.path.join(ROOT, 'data/tasks'), exist_ok=True)
+                with open(full, 'wb') as f:
+                    f.write(text.encode())
+                if git('add', '--', path).returncode != 0:
+                    raise ApiError(500, {'error': f'could not stage {path}'})
+            if _unmerged():
+                raise ApiError(500, {'error': 'conflicts remain after resolving'})
+            # No merge in progress means there was nothing to merge: just push.
+            if git('rev-parse', '-q', '--verify', 'MERGE_HEAD').returncode == 0:
+                r = git('commit', '-m', message.strip())
+                if r.returncode != 0:
+                    raise ApiError(500, {'error': 'commit failed', 'detail': r.stderr.strip()})
+            done = True
+        finally:
+            if not done:
+                _abort_merge()
+        r = git('push')
+        if r.returncode != 0:
+            raise ApiError(502, {'error': 'push failed', 'detail': r.stderr.strip()})
+        return git_status(fetch=False)
 
 
 def resolve_static(path):
@@ -343,9 +456,15 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if not path.startswith('/api/') or not self.authorized():
             return self.send_json(403, {'error': 'forbidden'})
-        body = self.read_json_body(MAX_BODY)
+        body = self.read_json_body(MAX_PLAN_BODY if path == '/api/git/resolve' else MAX_BODY)
         if body is None:
             return
+        if path in ('/api/git/conflicts', '/api/git/resolve'):
+            try:
+                result = git_conflicts() if path.endswith('conflicts') else git_resolve(body)
+            except ApiError as e:
+                return self.send_json(e.status, e.body)
+            return self.send_json(200, result)
         if path == '/api/git/sync':
             message = body.get('message') if isinstance(body, dict) else None
             if not isinstance(message, str) or not message.strip() or len(message) > 500:

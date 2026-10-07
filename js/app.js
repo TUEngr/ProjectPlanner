@@ -198,16 +198,22 @@ function updateSyncButton() {
   b.classList.toggle('attention', !!g && (dataFiles(g).length > 0 || g.ahead > 0 || g.behind > 0));
 }
 
-let gitBusy = false, gitAgain = false;
-async function refreshGit(full = true) {
-  if (!state.repo) return;
-  if (gitBusy) { gitAgain = gitAgain || full; return; }
-  gitBusy = true;
-  try { state.git = await state.repo.api.status(full); } catch { /* keep the last known status */ }
-  gitBusy = false;
-  if (state.sched) renderStatus();
-  updateSyncButton();
-  if (gitAgain) { gitAgain = false; refreshGit(true); }
+// Git status refreshes run one at a time. A call returns a promise for a refresh
+// that starts after the call, so `await refreshGit()` always sees fresh numbers.
+let gitRun = Promise.resolve(), gitPending = null;
+function refreshGit(full = true) {
+  if (!state.repo) return Promise.resolve();
+  if (gitPending && (gitPending.full || !full)) return gitPending.promise; // a queued refresh already covers this one
+  const job = { full };
+  job.promise = gitRun.then(async () => {
+    if (gitPending === job) gitPending = null;
+    try { state.git = await state.repo.api.status(job.full); } catch { /* keep the last known status */ }
+    if (state.sched) renderStatus();
+    updateSyncButton();
+  });
+  gitPending = job;
+  gitRun = job.promise;
+  return job.promise;
 }
 
 function onRepoState(st) {
@@ -262,14 +268,21 @@ function defaultCommitMessage(files) {
 }
 
 async function startSync() {
-  const s = state.repo;
-  if (!s || state.locked) return;
-  try { await s.flush(); } catch (e) { return toast(e.message, 'error'); }
-  if (s.state !== 'saved') return;
-  await refreshGit(true);
-  const g = state.git;
-  if (!g) return toast('Could not read the git status.', 'error');
-  const files = dataFiles(g);
+  const s = state.repo, btn = $('#btn-sync');
+  if (!s || state.locked || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = 'Checking…'; // saving and asking GitHub what is new can take a moment
+  let g, files;
+  try {
+    try { await s.flush(); } catch (e) { return toast(e.message, 'error'); }
+    if (s.state !== 'saved') return;
+    await refreshGit(true);
+    g = state.git;
+    if (!g) return toast('Could not read the git status.', 'error');
+    files = dataFiles(g);
+  } finally {
+    if (!state.locked) { btn.disabled = false; btn.textContent = 'Sync'; }
+  }
   if (!files.length) { // nothing to commit: only pull and/or push
     if (!g.ahead && !g.behind) return toast('Already in sync with GitHub.');
     return runSync('Sync');
@@ -291,15 +304,99 @@ async function runSync(message) {
     if (r.status === 'ok') {
       toast(`Synced with GitHub${behind ? `; pulled ${behind} new commit${behind > 1 ? 's' : ''}` : ''}.`);
     } else if (r.status === 'conflict') {
-      const names = r.files.map(p => `• ${taskLabel(p, s.base)}`).join('\n');
-      showProblem('Your teammate changed the same task',
-        `Both of you changed:\n${names}\n\nYour changes are saved and committed on your side, and nothing was lost. Resolving this inside the app is coming in the next update. For now, either ask your teammate to sync first and then sync again, or resolve it in the terminal (git pull, fix the files, git commit) and reload this page.`);
+      await startMerge();
     } else if (r.status === 'error') {
       showProblem('Sync did not complete', r.message);
     }
   } catch (e) {
     toast(e.message, 'error');
   } finally {
+    lockUI(false);
+    refreshGit(true);
+  }
+}
+
+// ---- resolving a conflict with a teammate ----
+
+let mergeState = null;
+
+function taskName(id) { return state.plan.tasks.find(t => t.id === id)?.name || id; }
+
+// How a field's value reads to a person.
+function describeValue(c, v) {
+  if (c.field === '*') return v ? `Keep the task “${v.name || '(unnamed)'}”` : 'Delete the task';
+  if (v === undefined || v === null) return c.key !== undefined ? 'Remove it' : '(empty)';
+  switch (c.field) {
+    case 'preds': return `${taskName(v.id)}, ${{ FS: 'finish-to-start', SS: 'start-to-start', FF: 'finish-to-finish' }[v.type] || v.type}`;
+    case 'holidays': return `${v.date}${v.label ? ' ' + v.label : ''}`;
+    case 'duration': return `${v} day${v === 1 ? '' : 's'}`;
+    case 'pct': return `${v}%`;
+    case 'level': return v === 0 ? 'top level' : `indented ${v} level${v > 1 ? 's' : ''}`;
+    case 'rank': return 'moved to a different place';
+    case 'manualStart': return v || '(not pinned)';
+    case 'satOff': case 'sunOff': case 'showGantt': case 'showPert': return v ? 'yes' : 'no';
+    default: return String(v) === '' ? '(empty)' : String(v);
+  }
+}
+
+function clashLabel(c) {
+  if (c.field === '*') return 'The task was deleted by one of you and changed by the other';
+  if (c.field === 'preds') return `Predecessor “${taskName(c.key)}”`;
+  if (c.field === 'holidays') return `Holiday ${c.key}`;
+  return c.label;
+}
+
+function renderMergeDialog(m) {
+  $('#merge-body').innerHTML = m.items.filter(a => a.conflicts.length).map((a, i) => `
+    <section class="merge-item">
+      <h3>${esc(a.title)}</h3>
+      ${a.auto ? `<p class="hint">${a.auto} other change${a.auto > 1 ? 's' : ''} merged automatically.</p>` : ''}
+      ${a.conflicts.map((c, j) => `
+        <fieldset class="clash" data-path="${esc(a.path)}" data-cid="${esc(c.id)}">
+          <legend>${esc(clashLabel(c))}</legend>
+          <label class="check"><input type="radio" name="m${i}_${j}" value="ours"> <span><b>Yours</b>: ${esc(describeValue(c, c.ours))}</span></label>
+          <label class="check"><input type="radio" name="m${i}_${j}" value="theirs"> <span><b>Theirs</b>: ${esc(describeValue(c, c.theirs))}</span></label>
+        </fieldset>`).join('')}
+    </section>`).join('');
+  $('#btn-merge-finish').disabled = true;
+}
+
+function mergeChoices() {
+  const choices = {}, sets = [...document.querySelectorAll('#merge-body fieldset.clash')];
+  let complete = true;
+  for (const fs of sets) {
+    const picked = fs.querySelector('input:checked')?.value;
+    if (!picked) { complete = false; continue; }
+    (choices[fs.dataset.path] ||= {})[fs.dataset.cid] = picked;
+  }
+  return { choices, complete };
+}
+
+async function startMerge() {
+  let m;
+  try { m = await state.repo.beginMerge(); } catch (e) { return showProblem('Sync did not complete', e.message); }
+  if (m.unresolvable.length) {
+    const names = m.unresolvable.map(p => `• ${p.startsWith('data/') ? taskLabel(p, state.repo.base) : p}`).join('\n');
+    return showProblem('This conflict cannot be resolved in the app',
+      `These files conflict and are not plan data the app can merge:\n${names}\n\nResolve them in the terminal (git pull, fix the files, git commit), then reload this page.`);
+  }
+  if (!m.items.some(a => a.conflicts.length)) return completeMerge(m, {}); // everything merges by itself
+  mergeState = m;
+  renderMergeDialog(m);
+  $('#dlg-merge').showModal();
+}
+
+async function completeMerge(m, choices) {
+  lockUI(true);
+  try {
+    const r = await state.repo.finishMerge(m, choices, 'Merge teammate changes');
+    if (r.status === 'ok') toast('Merged your teammate’s changes and pushed.');
+    else if (r.status === 'changed') showProblem('The remote changed again', 'Someone pushed while you were deciding. Nothing was changed. Press Sync again to see the new differences.');
+    else showProblem('The merge did not complete', r.message);
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    mergeState = null;
     lockUI(false);
     refreshGit(true);
   }
@@ -958,6 +1055,20 @@ function wireEvents() {
     });
   }
   $('#btn-problem-reload').addEventListener('click', () => location.reload());
+  $('#merge-body').addEventListener('change', () => { $('#btn-merge-finish').disabled = !mergeChoices().complete; });
+  $('#btn-merge-finish').addEventListener('click', () => {
+    const { choices, complete } = mergeChoices();
+    if (!complete || !mergeState) return;
+    $('#dlg-merge').close();
+    completeMerge(mergeState, choices);
+  });
+  $('#btn-merge-cancel').addEventListener('click', () => $('#dlg-merge').close());
+  $('#dlg-merge').addEventListener('close', () => {
+    if (mergeState && !state.locked) {
+      mergeState = null;
+      toast('Nothing was merged. Your changes are safe; press Sync to try again.');
+    }
+  });
   $('#btn-export').addEventListener('click', () => {
     store.downloadText(`${store.safeFilename(state.plan.name)}.json`, store.planToJSON(state.plan));
   });

@@ -135,6 +135,15 @@ export function planToFiles(plan) {
   return files;
 }
 
+export function isPlanPath(path) {
+  return path === PLAN_FILE || TASK_FILE_RE.test(path);
+}
+
+// Text of one data file from an already-parsed object (keys in the canonical order).
+export function serializeFile(path, obj) {
+  return path === PLAN_FILE ? json(planObject({ holidays: [], ...obj })) : json(taskObject({ preds: [], ...obj }));
+}
+
 function parseFile(path, text) {
   try {
     return JSON.parse(text);

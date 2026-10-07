@@ -64,7 +64,7 @@ const taskNames = dir => Object.entries(disk(dir)).filter(([k]) => k.startsWith(
 
   // 3. Sync from the UI commits and pushes with Alice as author
   await pa.click('#btn-sync');
-  check(await pa.isVisible('#dlg-sync'), 'Sync opens a commit-message dialog when there are changes');
+  check(await waitFor(() => pa.isVisible('#dlg-sync'), 10000), 'Sync opens a commit-message dialog when there are changes');
   const msg = await pa.inputValue('#sync-form [name=message]');
   check(/^Update plan settings and 3 tasks$/.test(msg), `default message summarises the change (“${msg}”)`);
   await pa.click('#sync-form button[value=sync]');
@@ -93,13 +93,13 @@ const taskNames = dir => Object.entries(disk(dir)).filter(([k]) => k.startsWith(
   await pa.click('#btn-sync'); await pa.click('#sync-form button[value=sync]');
   await waitFor(async () => /in sync/.test(await statusText(pa)), 15000);
   await pb.click('#btn-sync'); await pb.click('#sync-form button[value=sync]');
-  check(await waitFor(() => pb.isVisible('#dlg-problem'), 15000), 'git conflict opens an explanation dialog');
-  const body = await pb.textContent('#problem-body');
-  check(body.includes('• Build v-Bob'), `the dialog names the clashing task exactly (“${body.split('\n')[1]}”)`);
-  check(git(B, 'status', '--porcelain').trim() === '' && !/<<<<<<<|>>>>>>>/.test(Object.values(disk(B)).join('')), 'Bob\'s tree is clean: merge aborted, no conflict markers');
+  check(await waitFor(() => pb.isVisible('#dlg-merge'), 15000), 'a same-task conflict opens the choose-a-version dialog');
+  const body = await pb.textContent('#dlg-merge');
+  check(body.includes('Yours: Build v-Bob') && body.includes('Theirs: Build v-Alice'), 'it shows both versions of the clashing field');
+  await pb.click('#btn-merge-cancel'); // resolving is covered by tests/e2e-merge.cjs; here, cancelling must change nothing
+  check(git(B, 'status', '--porcelain').trim() === '' && !/<<<<<<<|>>>>>>>/.test(Object.values(disk(B)).join('')), 'cancelling leaves Bob\'s tree clean: merge aborted, no conflict markers');
   check(taskNames(B).includes('Build v-Bob'), 'Bob\'s version is still on disk');
-  check(!(await pb.isDisabled('#btn-sync')) && !(await pb.evaluate(() => document.body.classList.contains('syncing'))), 'the UI is usable again after a failed sync');
-  await pb.click('#dlg-problem .close');
+  check(!(await pb.isDisabled('#btn-sync')) && !(await pb.evaluate(() => document.body.classList.contains('syncing'))), 'the UI is usable again');
 
   // 6. disk changed underneath while editing the same task: conflict dialog, choose mine
   const taskFileA = fs.readdirSync(path.join(A, 'data/tasks')).find(f => JSON.parse(fs.readFileSync(path.join(A, 'data/tasks', f), 'utf8')).name === 'Build v-Alice');

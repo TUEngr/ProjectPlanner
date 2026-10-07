@@ -360,3 +360,10 @@ body.syncing #main, body.syncing .toolbar { pointer-events: none; opacity: .55; 
 #btn-sync.attention::after { content: ' \2022'; }
 .conflict-item .side { display: block; font-weight: 400; color: var(--fg-muted); font-size: 13px; }
 #problem-body { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 46ch; }
+#dlg-merge { max-width: 580px; max-height: 88vh; overflow: auto; }
+.merge-item { margin: 14px 0; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; }
+.merge-item h3 { margin: 0 0 4px; font-size: 15px; }
+fieldset.clash { border: 0; padding: 0; margin: 10px 0 0; }
+fieldset.clash legend { font-weight: 600; font-size: 13px; padding: 0; margin-bottom: 2px; }
+fieldset.clash label.check { align-items: flex-start; font-weight: 400; margin: 3px 0; }
+fieldset.clash label.check b { font-weight: 600; }

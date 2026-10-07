@@ -104,7 +104,8 @@ class ServerCase(unittest.TestCase):
 
 class AuthAndStatic(ServerCase):
     def test_api_requires_token(self):
-        for method, path in (('GET', '/api/plan'), ('GET', '/api/git/status'), ('PUT', '/api/plan'), ('POST', '/api/git/sync')):
+        for method, path in (('GET', '/api/plan'), ('GET', '/api/git/status'), ('PUT', '/api/plan'), ('POST', '/api/git/sync'),
+                             ('POST', '/api/git/conflicts'), ('POST', '/api/git/resolve')):
             for token in (False, 'wrong', 'é'):
                 status, _ = self.call(method, path, {'x': 1}, token=token)
                 self.assertEqual(status, 403, f'{method} {path} token={token!r}')
@@ -115,8 +116,9 @@ class AuthAndStatic(ServerCase):
         for origin in (None, '', 'http://evil.example', 'http://127.0.0.1:1', 'null'):
             status, _ = self.call('PUT', '/api/plan', {'baseRev': rev, 'files': files}, origin=origin)
             self.assertEqual(status, 403, f'origin={origin!r}')
-            status, _ = self.call('POST', '/api/git/sync', {'message': 'x'}, origin=origin)
-            self.assertEqual(status, 403, f'origin={origin!r}')
+            for route in ('/api/git/sync', '/api/git/conflicts', '/api/git/resolve'):
+                status, _ = self.call('POST', route, {'message': 'x'}, origin=origin)
+                self.assertEqual(status, 403, f'{route} origin={origin!r}')
         self.assertEqual(self.data_listing(), [])
 
     def test_static_whitelist(self):
@@ -296,8 +298,8 @@ class PlanReadWrite(ServerCase):
         self.assertEqual(len(self.get_plan()['files']), 2)
 
 
-class GitSync(unittest.TestCase):
-    """git_sync against a bare remote and two clones, driven directly."""
+class GitCase(unittest.TestCase):
+    """A bare remote and two clones (a, b), driven directly."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -331,6 +333,11 @@ class GitSync(unittest.TestCase):
     def sync(self, clone, msg='update'):
         with root(clone):
             return serve.git_sync(msg)
+
+
+
+class GitSync(GitCase):
+    """git_sync."""
 
     def test_commit_and_push_reaches_the_remote_with_the_users_identity(self):
         self.write(self.a, 'data/tasks/t2.json', TASK('t2'))
@@ -404,6 +411,198 @@ class GitSync(unittest.TestCase):
             for k, v in old.items():
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
             env_home.cleanup()
+
+
+class ConflictResolution(GitCase):
+    """/conflicts and /resolve: the repo is never left mid-merge."""
+
+    T1 = 'data/tasks/t1.json'
+
+    def head(self, clone):
+        return run(clone, 'rev-parse', 'HEAD').stdout.strip()
+
+    def assert_untouched(self, clone, head):
+        self.assertEqual(self.head(clone), head, 'HEAD moved')
+        self.assertFalse(os.path.exists(os.path.join(clone, '.git', 'MERGE_HEAD')), 'merge left in progress')
+        self.assertEqual(run(clone, 'status', '--porcelain', '--untracked-files=no').stdout, '')
+
+    def make_conflict(self):
+        """A changes t1 and pushes; B changes t1 differently and its Sync aborts the merge."""
+        self.write(self.a, self.T1, TASK('A-version'))
+        self.write(self.b, self.T1, TASK('B-version'))
+        self.assertEqual(self.sync(self.a, 'A')[0], 200)
+        self.assertEqual(self.sync(self.b, 'B')[0], 409)
+
+    def conflicts(self, clone):
+        with root(clone):
+            return serve.git_conflicts()
+
+    def resolve(self, clone, **kw):
+        with root(clone):
+            return serve.git_resolve(kw)
+
+    def test_conflicts_returns_all_three_versions_and_restores_the_tree(self):
+        self.make_conflict()
+        head = self.head(self.b)
+        c = self.conflicts(self.b)
+        self.assertEqual(list(c['entries']), [self.T1])
+        self.assertEqual(c['entries'][self.T1], {'base': TASK('t1'), 'ours': TASK('B-version'), 'theirs': TASK('A-version')})
+        self.assertEqual((c['ours'], c['theirs']), (head, run(self.b, 'rev-parse', '@{u}').stdout.strip()))
+        self.assert_untouched(self.b, head)
+        with open(os.path.join(self.b, self.T1)) as f:
+            self.assertEqual(f.read(), TASK('B-version'))     # working file is back to my version
+
+    def test_resolve_writes_the_resolution_makes_a_merge_commit_and_pushes(self):
+        self.make_conflict()
+        c = self.conflicts(self.b)
+        merged = TASK('merged-by-hand')
+        status = self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files={self.T1: merged}, message='Merge teammate changes')
+        self.assertEqual((status['ahead'], status['behind']), (0, 0))
+        self.assert_untouched(self.b, self.head(self.b))
+        parents = run(self.b, 'log', '-1', '--format=%P').stdout.split()
+        self.assertEqual(len(parents), 2, 'expected a merge commit')
+        self.assertEqual(run(self.remote, 'rev-parse', 'main').stdout, run(self.b, 'rev-parse', 'HEAD').stdout)
+        run(self.a, 'pull', '-q')                              # the other person simply fast-forwards
+        with open(os.path.join(self.a, self.T1)) as f:
+            self.assertEqual(f.read(), merged)
+
+    def test_modify_delete_conflict_can_be_resolved_either_way(self):
+        run(self.a, 'rm', '-q', self.T1)
+        run(self.a, 'commit', '-qm', 'A deletes t1')
+        run(self.a, 'push', '-q')
+        self.write(self.b, self.T1, TASK('B edits t1'))
+        self.assertEqual(self.sync(self.b, 'B')[0], 409)
+        c = self.conflicts(self.b)
+        self.assertEqual((c['entries'][self.T1]['ours'], c['entries'][self.T1]['theirs']), (TASK('B edits t1'), None))
+        self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files={self.T1: None}, message='accept delete')
+        self.assertFalse(os.path.exists(os.path.join(self.b, self.T1)))
+        run(self.a, 'pull', '-q')
+        self.assertFalse(os.path.exists(os.path.join(self.a, self.T1)))
+
+    def test_keeping_the_edited_side_of_a_modify_delete_conflict(self):
+        run(self.a, 'rm', '-q', self.T1)
+        run(self.a, 'commit', '-qm', 'A deletes t1')
+        run(self.a, 'push', '-q')
+        self.write(self.b, self.T1, TASK('B edits t1'))
+        self.sync(self.b, 'B')
+        c = self.conflicts(self.b)
+        self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files={self.T1: TASK('B edits t1')}, message='keep it')
+        run(self.a, 'pull', '-q')
+        with open(os.path.join(self.a, self.T1)) as f:
+            self.assertEqual(f.read(), TASK('B edits t1'))
+
+    def test_two_people_creating_plan_json_in_an_empty_project_conflict_on_add_add(self):
+        # fresh remote with no plan yet
+        base = os.path.dirname(self.a)
+        run(base, 'clone', '-q', 'remote.git', 'c')
+        run(os.path.join(base, 'c'), 'config', 'user.name', 'C')
+        run(os.path.join(base, 'c'), 'config', 'user.email', 'c@example.com')
+        run(self.a, 'rm', '-rq', 'data')
+        run(self.a, 'commit', '-qm', 'empty project')
+        run(self.a, 'push', '-q')
+        run(self.b, 'pull', '-q')
+        os.makedirs(os.path.join(self.a, 'data'))
+        os.makedirs(os.path.join(self.b, 'data'))
+        self.write(self.a, 'data/plan.json', json.dumps({'id': 'a', 'name': 'From A'}) + '\n')
+        self.write(self.b, 'data/plan.json', json.dumps({'id': 'b', 'name': 'From B'}) + '\n')
+        self.assertEqual(self.sync(self.a, 'A creates')[0], 200)
+        self.assertEqual(self.sync(self.b, 'B creates')[0], 409)
+        c = self.conflicts(self.b)
+        entry = c['entries']['data/plan.json']
+        self.assertEqual((entry['base'], json.loads(entry['ours'])['id'], json.loads(entry['theirs'])['id']), (None, 'b', 'a'))
+        self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files={'data/plan.json': PLAN}, message='merge')
+        self.assertEqual(run(self.remote, 'rev-parse', 'main').stdout, run(self.b, 'rev-parse', 'HEAD').stdout)
+
+    def test_a_clean_merge_needs_no_files_and_still_completes(self):
+        self.write(self.a, 'data/tasks/t2.json', TASK('t2'))
+        self.assertEqual(self.sync(self.a, 'A')[0], 200)
+        run(self.b, 'fetch', '-q')
+        self.write(self.b, 'data/tasks/t3.json', TASK('t3'))
+        run(self.b, 'add', '-A'); run(self.b, 'commit', '-qm', 'B local')
+        c = self.conflicts(self.b)
+        self.assertEqual(c['entries'], {})
+        self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files={}, message='merge')
+        self.assertEqual(sorted(os.listdir(os.path.join(self.b, 'data/tasks'))), ['t1.json', 't2.json', 't3.json'])
+
+    def test_resolving_when_there_is_nothing_to_merge_just_pushes(self):
+        self.write(self.b, 'data/tasks/t4.json', TASK('t4'))
+        run(self.b, 'add', '-A'); run(self.b, 'commit', '-qm', 'B local')
+        head = self.head(self.b)
+        c = self.conflicts(self.b)                       # upstream is behind us: no merge to make
+        self.assertEqual(c['entries'], {})
+        status = self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files={}, message='m')
+        self.assertEqual((status['ahead'], self.head(self.b)), (0, head))
+        self.assertEqual(run(self.remote, 'rev-parse', 'main').stdout.strip(), head)
+
+    def test_bad_resolutions_are_refused_and_leave_the_repo_exactly_as_it_was(self):
+        self.make_conflict()
+        c = self.conflicts(self.b)
+        head = self.head(self.b)
+        ok_files = {self.T1: TASK('x')}
+        base = dict(ours=c['ours'], theirs=c['theirs'], message='m')
+        cases = {
+            'missing the conflicted file': (409, dict(base, files={})),
+            'extra file not in conflict': (409, dict(base, files={**ok_files, 'data/tasks/t9.json': TASK('9')})),
+            'path outside the allowed ones': (400, dict(base, files={**ok_files, '../evil.json': TASK('e')})),
+            'traversal inside data': (400, dict(base, files={'data/tasks/../plan.json': TASK('e')})),
+            'not json': (400, dict(base, files={self.T1: 'not json'})),
+            'json array': (400, dict(base, files={self.T1: '[1]'})),
+            'content not a string': (400, dict(base, files={self.T1: {'a': 1}})),
+            'stale ours': (409, dict(base, ours='0' * 40, files=ok_files)),
+            'stale theirs': (409, dict(base, theirs='1' * 40, files=ok_files)),
+            'bad commit id': (400, dict(base, ours='main; rm -rf /', files=ok_files)),
+            'empty message': (400, dict(base, message='  ', files=ok_files)),
+            'files not an object': (400, dict(base, files=[self.T1])),
+        }
+        for name, (status, body) in cases.items():
+            with self.assertRaises(serve.ApiError, msg=name) as cm:
+                self.resolve(self.b, **body)
+            self.assertEqual(cm.exception.status, status, f'{name}: {cm.exception.body}')
+            self.assert_untouched(self.b, head)
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(self.b), 'evil.json')))
+        # and the right resolution still works afterwards
+        self.resolve(self.b, **base, files=ok_files)
+
+    def test_conflicts_in_files_outside_data_cannot_be_resolved_here(self):
+        for clone, text in ((self.a, 'A'), (self.b, 'B')):
+            os.makedirs(os.path.join(clone, 'js'), exist_ok=True)
+            self.write(clone, 'js/code.txt', text)
+            run(clone, 'add', 'js/code.txt'); run(clone, 'commit', '-qm', f'{text} code')
+        run(self.a, 'push', '-q')
+        run(self.b, 'fetch', '-q')
+        head = self.head(self.b)
+        c = self.conflicts(self.b)
+        self.assertEqual(list(c['entries']), ['js/code.txt'])
+        for files, status in (({}, 409), ({'js/code.txt': TASK('x')}, 400)):
+            with self.assertRaises(serve.ApiError) as cm:
+                self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files=files, message='m')
+            self.assertEqual(cm.exception.status, status, cm.exception.body)
+            self.assert_untouched(self.b, head)
+
+    def test_a_remote_that_moves_between_looking_and_resolving_is_detected(self):
+        self.make_conflict()
+        c = self.conflicts(self.b)
+        self.write(self.a, 'data/tasks/t5.json', TASK('t5'))
+        self.assertEqual(self.sync(self.a, 'A again')[0], 200)
+        head = self.head(self.b)                               # note: B has NOT fetched; resolve must notice by itself
+        with self.assertRaises(serve.ApiError) as cm:
+            self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files={self.T1: TASK('x')}, message='m')
+        self.assertEqual((cm.exception.status, cm.exception.body['error']), (409, 'changed'))
+        self.assert_untouched(self.b, head)
+
+    def test_push_failure_keeps_the_merge_commit_locally(self):
+        self.make_conflict()
+        c = self.conflicts(self.b)
+        run(self.remote, 'config', 'receive.denyCurrentBranch', 'refuse')
+        hook = os.path.join(self.remote, 'hooks', 'pre-receive')
+        with open(hook, 'w') as f:
+            f.write('#!/bin/sh\necho rejected >&2\nexit 1\n')
+        os.chmod(hook, 0o755)
+        with self.assertRaises(serve.ApiError) as cm:
+            self.resolve(self.b, ours=c['ours'], theirs=c['theirs'], files={self.T1: TASK('x')}, message='m')
+        self.assertEqual(cm.exception.status, 502)
+        self.assertEqual(len(run(self.b, 'log', '-1', '--format=%P').stdout.split()), 2, 'merge commit kept')
+        self.assertFalse(os.path.exists(os.path.join(self.b, '.git', 'MERGE_HEAD')))
 
 
 class SyncRequestValidation(ServerCase):

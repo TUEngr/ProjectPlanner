@@ -16,10 +16,11 @@
     import renderResults from './render.test.js';
     import storageResults from './storage.test.js';
     import repoResults, { ready } from './repo.test.js';
+    import mergeResults from './merge.test.js';
     import { encodeShare, decodeShare, normalize } from '../js/storage.js';
     import { samplePlan } from '../js/sample.js';
 
-    const results = [...scheduleResults, ...renderResults, ...storageResults];
+    const results = [...scheduleResults, ...renderResults, ...storageResults, ...mergeResults];
     await ready; // async repo tests
     results.push(...repoResults);
     try {

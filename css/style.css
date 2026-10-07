@@ -276,6 +276,8 @@ dialog label input, dialog label textarea, #share-url {
 }
 #toast.show { opacity: 1; transform: translateX(-50%); }
 #toast.error { background: var(--crit); color: #fff; }
+#toast.sticky { pointer-events: auto; cursor: pointer; padding-right: 32px; }
+#toast.sticky::after { content: '✕'; position: absolute; right: 12px; top: 8px; opacity: .8; }
 
 #tip {
   position: fixed; z-index: 60; max-width: 320px; pointer-events: none;

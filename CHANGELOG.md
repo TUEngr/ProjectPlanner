@@ -4,6 +4,9 @@ What changed in each version of [Project Planner](https://tuengr.github.io/Proje
 
 Version numbers: the middle number goes up for new features, the last number for fixes and smaller improvements.
 
+## 1.10.1 — 2026-10-07
+- The message after importing an Excel or CSV file now stays up for 30 seconds, or until you click it, so there's time to read it.
+
 ## 1.10.0 — 2026-10-07
 - Open → Excel file: make a plan from an Excel workbook (.xlsx, including files saved from Google Sheets or Numbers). The first sheet with a Task column is used, title rows above the column names are skipped, and dates, percentages, and formula results are read as Excel shows them.
 - CSV files may also have title rows above the column names.

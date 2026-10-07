@@ -410,6 +410,14 @@
         'links by line order (2SS, 3) and the pinned start date');
       check(/Schedule/.test(d.getElementById('toast').textContent) && /non-numeric/.test(d.getElementById('toast').textContent),
         `toast names the sheet and flags the TRUE/FALSE cell (“${d.getElementById('toast').textContent.slice(0, 80)}…”)`);
+      // The import summary stays up (30 s) until clicked
+      const tEl = d.getElementById('toast');
+      await sleep(3000);
+      check(tEl.classList.contains('show') && tEl.classList.contains('sticky'), 'the import message is still showing after 3 s (ordinary messages go after 2.5 s)');
+      tEl.click(); await sleep(50);
+      check(!tEl.classList.contains('show'), 'clicking the import message closes it');
+      await click('undo'); // an ordinary message ("Nothing to undo") is not sticky
+      check(!tEl.classList.contains('sticky') && getComputedStyle(tEl).pointerEvents === 'none', 'ordinary messages stay unclickable and short-lived');
       // Failures explain themselves and offer the template
       await feed('old.xls', new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).buffer);
       check(d.getElementById('dlg-import-error').open && /old-style Excel file/.test(d.getElementById('import-error-msg').textContent),

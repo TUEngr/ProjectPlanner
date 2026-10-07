@@ -88,12 +88,20 @@ function columnScale() {
 // ---------- toast ----------
 
 let toastTimer;
-function toast(msg, kind = '') {
+// Brief status message. { sticky: true } is for messages worth reading (an
+// import summary): it stays up for 30 s or until clicked.
+const STICKY_MS = 30000;
+function toast(msg, kind = '', { sticky = false } = {}) {
   const el = $('#toast');
   el.textContent = msg;
-  el.className = `show ${kind}`;
+  el.className = `show ${kind}${sticky ? ' sticky' : ''}`;
+  el.title = sticky ? 'Click to close' : '';
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.className = ''; }, kind === 'error' ? 5000 : 2500);
+  toastTimer = setTimeout(hideToast, sticky ? STICKY_MS : kind === 'error' ? 5000 : 2500);
+}
+function hideToast() {
+  clearTimeout(toastTimer);
+  $('#toast').className = '';
 }
 
 // ---------- tooltips ----------
@@ -886,7 +894,7 @@ function importTable(file, build, what, where = '') {
     const n = plan.tasks.length;
     toast(`Imported ${n} task${n === 1 ? '' : 's'} from “${file.name}”${where} as a new plan.`
       + (warnings.length ? ` Note: ${warnings.join('; ')}.` : '')
-      + ` Holidays and weekend settings are not in ${what}; check Settings.`, warnings.length ? 'error' : '');
+      + ` Holidays and weekend settings are not in ${what}; check Settings.`, warnings.length ? 'error' : '', { sticky: true });
   } catch (e) {
     importFailed(file, e.message);
   }
@@ -925,6 +933,7 @@ function loadInitialPlan() {
 // ---------- events ----------
 
 function wireEvents() {
+  $('#toast').addEventListener('click', hideToast); // only clickable while sticky
   wireTips();
   wireDrawer();
   const tbody = $('#tbody');

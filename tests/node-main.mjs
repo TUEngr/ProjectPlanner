@@ -4,10 +4,11 @@ import renderResults from './render.test.js';
 import storageResults from './storage.test.js';
 import repoResults, { ready } from './repo.test.js';
 import mergeResults from './merge.test.js';
+import siteResults, { ready as siteReady } from './site.test.js';
 
-await ready; // async tests finish before reporting
+await Promise.all([ready, siteReady]); // async tests finish before reporting
 
-const results = [...scheduleResults, ...renderResults, ...storageResults, ...mergeResults, ...repoResults];
+const results = [...scheduleResults, ...renderResults, ...storageResults, ...mergeResults, ...siteResults, ...repoResults];
 let failed = 0;
 for (const [ok, msg] of results) {
   if (!ok) failed++;

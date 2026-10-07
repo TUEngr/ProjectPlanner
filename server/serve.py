@@ -180,6 +180,20 @@ def git(*args, check=False):
     )
 
 
+GITHUB_REMOTE_RE = re.compile(
+    r'^(?:https?://(?:[^/@\s]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)'
+    r'([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+?)(?:\.git)?/?$')
+
+
+def parse_github_remote(url):
+    """'owner/name' for a GitHub remote URL, else ''. Never returns the URL itself:
+    it may carry credentials (https://user:TOKEN@github.com/...)."""
+    m = GITHUB_REMOTE_RE.match(url.strip())
+    if not m or m.group(2) in ('.', '..'):
+        return ''
+    return f'{m.group(1)}/{m.group(2)}'
+
+
 def git_status(fetch=True):
     if fetch:
         try:
@@ -203,6 +217,7 @@ def git_status(fetch=True):
         'behind': behind,
         'dirty': [line[3:] for line in out[1:]],
         'user': git('config', 'user.name').stdout.strip(),
+        'repo': parse_github_remote(git('config', '--get', 'remote.origin.url').stdout),
     }
 
 

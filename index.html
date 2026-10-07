@@ -11,6 +11,7 @@
 <body>
   <header class="topbar">
     <div class="brand">Project Planner</div>
+    <a id="repo-link" class="repo-link" hidden target="_blank" rel="noopener" title="Open this project's repository on GitHub"></a>
     <button id="plan-name" class="plan-name" title="Plan settings">Untitled</button>
     <nav class="actions">
       <button id="btn-sync" class="primary" hidden title="Save, commit your changes, pull your teammates' changes and push to GitHub">Sync</button>
@@ -30,6 +31,11 @@
     <span>You are viewing a <strong>read-only shared copy</strong> of this plan.</span>
     <button id="btn-save-copy" class="primary">Save a copy to my plans</button>
     <button id="btn-close-shared">Close</button>
+  </div>
+
+  <div id="viewer-banner" class="banner" hidden>
+    <span id="viewer-text"></span>
+    <button id="btn-viewer-edit" class="primary" hidden title="Opens this project in a GitHub Codespace, where you can edit it and sync your changes">Open in Codespaces to edit</button>
   </div>
 
   <div class="toolbar">
@@ -189,15 +195,16 @@
       <li><strong>Critical path</strong> (red) is the chain of tasks with zero float: any slip in them delays the finish. <em>Float</em> is how many working days a task can slip without delaying the project. Links that drive the critical path are drawn in red.</li>
       <li><strong>Gantt chart</strong>: FS arrows run from the end of one bar to the start of the next; SS arrows join the left ends of the bars and FF arrows the right ends. The dark stripe inside a bar is % done, the dashed green line is today, and shaded columns are non-working days. Click a row to select it; double-click a task to edit it in the table (double-clicking a summary collapses it instead).</li>
       <li><strong>Settings</strong> (or click the plan name): rename the plan, set the project start date, list holidays (one <code>YYYY-MM-DD</code> per line with an optional label), choose whether Saturdays and Sundays are non-working days (both are by default; changing these reschedules every task), and choose whether the plan includes the Gantt and PERT views.</li>
-      <li><strong>Plans</strong>: keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
-      <li><strong>Saving</strong>: plans save automatically in this browser only. Use <em>Save file</em> / <em>Open file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
-      <li><strong>Share link</strong>: copies a link containing a read-only snapshot of the plan. Recipients can view it and click <em>Save a copy to my plans</em> to edit their own copy. Later edits are not included; share again to send an update. The plan is packed into the link itself, so nothing is uploaded, but very large plans make long links.</li>
+      <li><strong>Project repositories</strong>: when this page was opened from a project's repository (for example in a GitHub Codespace), the plan is not stored in the browser. It is saved automatically to the repository's <code>data</code> folder, and <em>Plans</em> and <em>Share link</em> are hidden. Press <em>Sync</em> to commit your changes, pull in your teammates' changes and push. If you and a teammate changed the same thing, a dialog asks which version to keep. The status bar shows what is waiting to be committed, pushed or pulled. Which groups you have collapsed stays in your own browser.</li>
+      <li><strong>Plans</strong> (standalone use): keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
+      <li><strong>Saving</strong> (standalone use): plans save automatically in this browser only. Use <em>Save file</em> / <em>Open file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
+      <li><strong>Share link</strong> (standalone use): copies a link containing a read-only snapshot of the plan. Recipients can view it and click <em>Save a copy to my plans</em> to edit their own copy. Later edits are not included; share again to send an update. The plan is packed into the link itself, so nothing is uploaded, but very large plans make long links.</li>
       <li><strong>PERT</strong> tab: a network diagram of the same tasks. Each box shows the row number, name, start and finish, duration, float, and assignee. Each task sits one column to the right of its last predecessor, so columns read left to right as the order of work. Arrows are dependencies (SS and FF are labeled), and the critical path is red. Collapsed groups appear as one dashed box; double-click it to expand. Double-click a task to edit it in the table. Since tasks have a single duration, this is a dependency network, not a three-point (optimistic / likely / pessimistic) PERT estimate.</li>
       <li><strong>Export PNG</strong> downloads the current chart as an image (2× resolution, light colors) for reports and slides: the PERT diagram on the PERT tab, otherwise the Gantt chart at the current zoom (switch to Weeks or Months first for a long project).</li>
       <li><strong>Printing</strong>: <em>Print</em> prints the current chart (the PERT diagram on the PERT tab, otherwise the Gantt chart at the current zoom); choose “Save as PDF” in the print dialog for a PDF.</li>
     </ul>
     <h3>Bugs and feature requests</h3>
-    <p>Report problems and suggest features on the <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">GitHub issues page</a> (a free GitHub account is needed). Search the existing issues first; if yours is already there, add a comment or a 👍 instead of opening a new one. Otherwise click <em>New issue</em> and include:</p>
+    <p>Report problems and suggest features on the planner's <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">GitHub issues page</a> (a free GitHub account is needed). Search the existing issues first; if yours is already there, add a comment or a 👍 instead of opening a new one. Otherwise click <em>New issue</em> and include:</p>
     <ul class="help">
       <li><strong>Bug</strong>: what you did, what you expected, and what happened instead, plus your browser and operating system. A screenshot helps, and so does the plan itself: use <em>Save file</em> and drag the .json file into the issue.</li>
       <li><strong>Feature request</strong>: what you are trying to do and why. The use case matters more than a specific design.</li>

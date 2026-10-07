@@ -9,6 +9,7 @@ import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
 import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 import { RepoApi, RepoSession, repoToken } from './repo.js';
+import { parseSlug, repoUrl, codespacesUrl, pageRepo, pageBundlePath, loadBundle } from './site.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
@@ -173,6 +174,16 @@ function adoptPlan(plan) {
   render();
 }
 
+// The header links to this project's repository, when we know it: from the page
+// (published site) or from the helper (a clone).
+function showRepoLink(repo) {
+  const a = $('#repo-link');
+  if (!repo) { a.hidden = true; return; }
+  a.textContent = repo.slug;
+  a.href = repoUrl(repo);
+  a.hidden = false;
+}
+
 const dataFiles = g => (g?.dirty || []).filter(p => p.startsWith('data/'));
 
 function repoSaveText() {
@@ -210,6 +221,7 @@ function refreshGit(full = true) {
     try { state.git = await state.repo.api.status(job.full); } catch { /* keep the last known status */ }
     if (state.sched) renderStatus();
     updateSyncButton();
+    showRepoLink(parseSlug(state.git?.repo));
   });
   gitPending = job;
   gitRun = job.promise;
@@ -399,6 +411,23 @@ async function completeMerge(m, choices) {
     mergeState = null;
     lockUI(false);
     refreshGit(true);
+  }
+}
+
+// ---- the published site, with a read-only plan the owner opted in to publish ----
+
+function openViewer(bundle, repo) {
+  document.body.classList.add('viewer');
+  openPlan(applyCollapsed(bundle.plan), { readOnly: true });
+  $('#readonly-banner').hidden = true; // that banner is for share links
+  const when = bundle.generated ? ` on ${new Date(bundle.generated).toLocaleDateString()}` : '';
+  const at = bundle.commit ? ` (version ${bundle.commit})` : '';
+  $('#viewer-text').innerHTML = `You are viewing a <strong>read-only copy</strong> of the project plan, as last published${esc(when)}${esc(at)}.`;
+  $('#viewer-banner').hidden = false;
+  if (repo) {
+    const b = $('#btn-viewer-edit');
+    b.hidden = false;
+    b.onclick = () => window.open(codespacesUrl(repo), '_blank', 'noopener');
   }
 }
 
@@ -1190,7 +1219,17 @@ async function init() {
   }
   const token = repoToken();
   if (token) return initRepo(token);
-  if (!(await loadFromHash())) openPlan(loadInitialPlan());
+  const repo = pageRepo();
+  showRepoLink(repo);
+  if (await loadFromHash()) return; // an explicit share link wins
+  let bundle = null;
+  try {
+    bundle = await loadBundle(pageBundlePath());
+  } catch (e) {
+    toast(`${e.message} Showing the example planner instead.`, 'error');
+  }
+  if (bundle) return openViewer(bundle, repo);
+  openPlan(loadInitialPlan());
 }
 
 init();

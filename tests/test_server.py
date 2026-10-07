@@ -605,6 +605,39 @@ class ConflictResolution(GitCase):
         self.assertFalse(os.path.exists(os.path.join(self.b, '.git', 'MERGE_HEAD')))
 
 
+class RepoName(GitCase):
+    def test_parses_github_remotes_and_nothing_else(self):
+        good = {
+            'https://github.com/Tudre/ProjectPlanner': 'Tudre/ProjectPlanner',
+            'https://github.com/Tudre/ProjectPlanner.git': 'Tudre/ProjectPlanner',
+            'https://github.com/Tudre/ProjectPlanner/': 'Tudre/ProjectPlanner',
+            'http://github.com/o/r': 'o/r',
+            'git@github.com:o/r.git': 'o/r',
+            'ssh://git@github.com/o/r.git': 'o/r',
+            'https://github.com/o/.github': 'o/.github',
+            'https://github.com/o/a.b-c_d': 'o/a.b-c_d',
+            '  https://github.com/o/r\n': 'o/r',
+        }
+        for url, want in good.items():
+            self.assertEqual(serve.parse_github_remote(url), want, url)
+        for url in ('', 'https://gitlab.com/o/r', 'https://github.com/o', 'https://github.com/o/r/extra', 'https://github.com.evil.com/o/r',
+                    'https://evil.com/github.com/o/r', 'file:///tmp/r.git', '/tmp/remote.git', 'https://github.com/o/..', 'https://github.com/-o/r',
+                    'https://github.com/o/r?x=1', 'https://github.com/o/r#x', 'ftp://github.com/o/r'):
+            self.assertEqual(serve.parse_github_remote(url), '', url)
+
+    def test_credentials_in_the_remote_url_never_reach_the_page(self):
+        for url in ('https://x-access-token:ghp_SECRETTOKEN123@github.com/o/r.git', 'https://ghp_SECRETTOKEN123@github.com/o/r'):
+            run(self.a, 'remote', 'set-url', 'origin', url)
+            with root(self.a):
+                status = serve.git_status(fetch=False)
+            self.assertEqual(status['repo'], 'o/r')
+            self.assertNotIn('SECRETTOKEN', json.dumps(status))
+
+    def test_a_local_remote_has_no_repo_name(self):
+        with root(self.a):
+            self.assertEqual(serve.git_status(fetch=False)['repo'], '')
+
+
 class SyncRequestValidation(ServerCase):
     def test_message_is_required_and_bounded(self):
         for body in ({}, {'message': ''}, {'message': '   '}, {'message': 5}, {'message': 'x' * 501}, [], None):

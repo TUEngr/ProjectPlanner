@@ -28,6 +28,9 @@ const A = path.join(E, 'A'), B = path.join(E, 'B');
 for (const f of ['index.html', 'css', 'js', 'server']) sh(SRC, 'cp', '-r', f, A);
 git(A, 'config', 'user.name', 'Alice'); git(A, 'config', 'user.email', 'a@x');
 git(A, 'checkout', '-q', '-b', 'main'); git(A, 'add', '-A'); git(A, 'commit', '-qm', 'app'); git(A, 'push', '-q', '-u', 'origin', 'main');
+// Present a GitHub-style address to the helper while real traffic still goes to the local remote.
+git(A, 'config', `url.${path.join(E, 'remote.git')}.insteadOf`, 'https://github.com/e2e/demo');
+git(A, 'remote', 'set-url', 'origin', 'https://github.com/e2e/demo');
 git(E, 'clone', '-q', 'remote.git', 'B'); git(B, 'config', 'user.name', 'Bob'); git(B, 'config', 'user.email', 'b@x');
 const servers = [];
 const start = (dir, port) => { const p = spawn('python3', ['server/serve.py', '--port', String(port)], { cwd: dir, stdio: 'ignore' }); servers.push(p); return p; };
@@ -71,6 +74,8 @@ const taskNames = dir => Object.entries(disk(dir)).filter(([k]) => k.startsWith(
   check(await waitFor(() => git(E, '--git-dir=remote.git', 'log', '-1', '--format=%an|%s').trim().startsWith('Alice|Update plan'), 15000), 'commit reached the remote, authored by Alice');
   await waitFor(async () => /in sync/.test(await statusText(pa)), 10000);
   check(/in sync/.test(await statusText(pa)), `status says in sync after Sync (“${await statusText(pa)}”)`);
+  check(await waitFor(async () => (await pa.isVisible('#repo-link')) && (await pa.textContent('#repo-link')) === 'e2e/demo', 5000), 'the header links to the repository (e2e/demo)');
+  check((await pa.getAttribute('#repo-link', 'href')) === 'https://github.com/e2e/demo', 'with the right address');
 
   // 4. Bob clones, edits a different task, both sync, no conflict
   git(B, 'pull', '-q', 'origin', 'main');

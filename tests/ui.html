@@ -350,8 +350,8 @@
       // ---- Open menu: CSV / JSON import ----
       const openBtn = d.getElementById('btn-open-menu'), openMenu = d.getElementById('open-menu');
       openBtn.click(); await sleep(30);
-      check(!openMenu.hidden && [...openMenu.querySelectorAll('[role="menuitem"] b')].map(b => b.textContent).join('|') === 'JSON file|CSV file',
-        'Open menu offers JSON file and CSV file');
+      check(!openMenu.hidden && [...openMenu.querySelectorAll('[role="menuitem"] b')].map(b => b.textContent).join('|') === 'JSON file|Excel file (.xlsx)|CSV file',
+        'Open menu offers JSON, Excel, and CSV files');
       d.getElementById('btn-import-csv').click(); await sleep(20);
       check(openMenu.hidden && d.getElementById('file-input').accept.includes('.csv'), 'CSV item opens a CSV file picker');
       const feed = async (name, text) => {
@@ -388,6 +388,63 @@
       // JSON still opens through the same picker
       await feed('rt.json', JSON.stringify({ name: 'From JSON', start: '2026-10-05', tasks: [{ id: 1, name: 'Only task', duration: 2, preds: [] }] }));
       check(d.getElementById('plan-name').textContent === 'From JSON' && count() === 1, 'JSON file still opens');
+      // ---- Open → Excel file ----
+      check([...openMenu.querySelectorAll('[role="menuitem"] b')].map(b => b.textContent).join('|') === 'JSON file|Excel file (.xlsx)|CSV file',
+        'Open menu offers JSON, Excel, and CSV');
+      const xbuf = await (await fetch('fixtures/plan.xlsx')).arrayBuffer();
+      const { readXlsx } = await import('../js/xlsx.js');
+      const sheets = await readXlsx(xbuf);
+      check(sheets.map(s => s.name).join() === 'Notes,Schedule' && sheets[1].rows[2].join('|') === 'WBS|Task|Duration||Depends on|% complete|Owner|Pinned start|Start',
+        'reader: both sheets, header row with the skipped column kept in place');
+      check(sheets[1].rows[7][1] === 'Fabricate chassis' && sheets[1].rows[5][1] === 'Concept selection',
+        'reader: rich-text and inline strings');
+      check(sheets[1].rows[3][8] === '2026-10-05' && sheets[1].rows[5][7] === '2026-10-07' && sheets[1].rows[4][5] === '40' && sheets[1].rows[5][5] === '12.5' && sheets[1].rows[4][2] === '5',
+        `reader: custom and built-in dates, percents, formula value (${sheets[1].rows[3][8]}, ${sheets[1].rows[5][7]}, ${sheets[1].rows[4][5]}%, ${sheets[1].rows[5][5]}%)`);
+      await feed('Senior plan.xlsx', xbuf);
+      const xnames = [...d.querySelectorAll('#tbody input[data-f="name"]')].map(i => i.value);
+      check(d.getElementById('plan-name').textContent === 'Senior plan' && xnames.join('|') === 'Planning|Define requirements|Concept selection|Build & test|Fabricate chassis',
+        `Excel file imports the “Schedule” sheet as a new plan (${xnames.length} tasks)`);
+      check(row(1).classList.contains('summary') && row(4).classList.contains('summary') && cell(2, 'duration').value === '5' && cell(2, 'pct').value === '40' && cell(3, 'pct').value === '13',
+        'outline from WBS numbers; formula duration; percentages');
+      check(cell(3, 'preds').value === '2SS' && cell(5, 'preds').value === '3' && cell(3, 'start').value === '2026-10-07' && row(3).querySelector('.c-date.pinned'),
+        'links by line order (2SS, 3) and the pinned start date');
+      check(/Schedule/.test(d.getElementById('toast').textContent) && /non-numeric/.test(d.getElementById('toast').textContent),
+        `toast names the sheet and flags the TRUE/FALSE cell (“${d.getElementById('toast').textContent.slice(0, 80)}…”)`);
+      // Failures explain themselves and offer the template
+      await feed('old.xls', new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).buffer);
+      check(d.getElementById('dlg-import-error').open && /old-style Excel file/.test(d.getElementById('import-error-msg').textContent),
+        'an old .xls file gets “save as .xlsx” advice');
+      d.getElementById('dlg-import-error').close();
+      await feed('fake.xlsx', 'PK this is not really a zip');
+      check(d.getElementById('dlg-import-error').open && /not an Excel workbook/.test(d.getElementById('import-error-msg').textContent),
+        `a damaged workbook is reported (“${d.getElementById('import-error-msg').textContent}”)`);
+      d.getElementById('dlg-import-error').close();
+
+      // ---- Templates offered after a failed import ----
+      const tplFirst = () => d.querySelector('#template-buttons button');
+      await feed('fake.xlsx', 'PK this is not really a zip');
+      check(tplFirst().id === 'btn-xlsx-template' && tplFirst().classList.contains('primary') && !d.getElementById('btn-csv-template').classList.contains('primary'),
+        'after a failed Excel import, the Excel template is offered first');
+      const xtpl = new Promise(resolve => {
+        const oc = w.HTMLAnchorElement.prototype.click, ou = w.URL.createObjectURL;
+        let blob = null;
+        w.URL.createObjectURL = b => { blob = b; return ou.call(w.URL, b); };
+        w.HTMLAnchorElement.prototype.click = function () { w.HTMLAnchorElement.prototype.click = oc; w.URL.createObjectURL = ou; resolve({ name: this.download, blob }); };
+      });
+      d.getElementById('btn-xlsx-template').click();
+      const xt = await Promise.race([xtpl, sleep(3000).then(() => null)]);
+      check(xt && xt.name === 'project-planner-template.xlsx' && /spreadsheetml/.test(xt.blob.type) && !d.getElementById('dlg-import-error').open,
+        `Excel template downloads (${xt?.name}, ${xt?.blob.size} bytes) and the dialog closes`);
+      const tsheets = await readXlsx(await xt.blob.arrayBuffer());
+      check(tsheets.length === 1 && tsheets[0].name === 'Tasks' && tsheets[0].rows[0][2] === 'Task' && tsheets[0].rows[4][4] === '3',
+        'the template reads back: one “Tasks” sheet, header and numbers intact');
+      await feed('project-planner-template.xlsx', await xt.blob.arrayBuffer());
+      check(d.getElementById('plan-name').textContent === 'project-planner-template' && count() === 6 && cell(4, 'preds').value === '3SS' && cell(5, 'duration').value === '0',
+        'the Excel template itself imports (6 tasks, 3SS link, milestone)');
+      await feed('broken.csv', 'Foo,Bar\n1,2\n');
+      check(tplFirst().id === 'btn-csv-template' && tplFirst().classList.contains('primary'), 'after a failed CSV import, the CSV template is offered first');
+      d.getElementById('dlg-import-error').close();
+
       // Back to the example plan used by the remaining tests
       d.getElementById('btn-plans').click(); await sleep(40);
       const li = [...d.querySelectorAll('#plan-list li')].find(l => l.textContent.includes(planBefore));

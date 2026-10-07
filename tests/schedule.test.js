@@ -8,6 +8,7 @@ import { parsePredList, formatLink } from '../js/table.js';
 import { normalize } from '../js/storage.js';
 import { planToCSV, parseCSV, csvToPlan, csvTemplate, csvDate } from '../js/csv.js';
 import { samplePlan } from '../js/sample.js';
+import { _internal as xlsxInternal } from '../js/xlsx.js';
 
 const results = [];
 function test(name, fn) {
@@ -255,7 +256,7 @@ test('CSV export: header, WBS numbers, links, quoting', () => {
 });
 
 test('parseCSV: quotes, embedded newlines, semicolons, BOM', () => {
-  eq(parseCSV('﻿a,b\r\n"x, ""y""","1\n2"\r\n\r\n'), [['a', 'b'], ['x, "y"', '1\n2']]);
+  eq(parseCSV('\uFEFFa,b\r\n"x, ""y""","1\n2"\r\n\r\n'), [['a', 'b'], ['x, "y"', '1\n2']]);
   eq(parseCSV('Task;Duration\nA;3\n'), [['Task', 'Duration'], ['A', '3']]);
 });
 
@@ -341,6 +342,25 @@ test('normalize: nearCritical defaults to 2 and is clamped', () => {
   eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: -3 }).nearCritical, 0);
   eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: 'x' }).nearCritical, 2);
   eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: 5 }).nearCritical, 5, 'an existing setting is kept:');
+});
+
+test('Excel serial dates and column letters', () => {
+  // Expected values checked against Python: date(1899,12,30) + 46300 days = 2026-10-05
+  const { serialToISO, colIndex } = xlsxInternal;
+  eq([serialToISO(46300, false), serialToISO(1, false), serialToISO(59, false), serialToISO(61, false)],
+    ['2026-10-05', '1900-01-01', '1900-02-28', '1900-03-01'], '1900 system (with Excel’s phantom 1900-02-29 = 60):');
+  eq(serialToISO(44838, true), '2026-10-05', '1904 system:');
+  eq(serialToISO(46300.75, false), '2026-10-05', 'time of day ignored:');
+  eq(['A1', 'Z9', 'AA10', 'AZ3', 'XFD1'].map(colIndex), [0, 25, 26, 51, 16383]);
+});
+
+test('xlsx writer helpers: CRC-32 and column names', () => {
+  const { crc32, colName, colIndex } = xlsxInternal;
+  const bytes = s => Array.from(s, c => c.charCodeAt(0));
+  eq(crc32(bytes('123456789')).toString(16), 'cbf43926', 'standard CRC-32 check value:');
+  eq(crc32([]), 0);
+  eq([0, 25, 26, 51, 701, 702, 16383].map(colName), ['A', 'Z', 'AA', 'AZ', 'ZZ', 'AAA', 'XFD']);
+  eq([0, 25, 26, 51, 701, 702, 16383].every(i => colIndex(colName(i) + '1') === i), true, 'round trip:');
 });
 
 test('durationBetween counts working days inclusive', () => {

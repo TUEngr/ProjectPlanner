@@ -7,7 +7,8 @@ import { renderTable, renderTableHead, parseDuration, parsePredList, COLUMNS, co
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
-import { planToCSV, csvToPlan, csvTemplate, csvDate } from './csv.js';
+import { planToCSV, csvToPlan, rowsToPlan, findHeaderRow, csvTemplate, csvDate, TEMPLATE_ROWS } from './csv.js';
+import { readXlsx, writeXlsx } from './xlsx.js';
 import { tablePrintHTML, tableStandaloneSVG } from './tableexport.js';
 import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 
@@ -824,6 +825,9 @@ async function exportPNG() {
 }
 
 async function importFile(file) {
+  // An .xlsx file is a zip archive: it starts with "PK"
+  const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+  if (head[0] === 0x50 && head[1] === 0x4b || /\.xlsx?$/i.test(file.name)) return importXlsx(file);
   const text = await file.text();
   // Go by content rather than the menu item, so a mislabelled file still opens
   const isJSON = /^\s*\{/.test(text.replace(/^\uFEFF/, ''));
@@ -846,22 +850,62 @@ async function importFile(file) {
 
 // A CSV becomes a new plan (it has no plan id, holidays, or settings).
 function importCSV(file, text) {
+  importTable(file, () => csvToPlan(text, importOpts(file)), 'a CSV file');
+}
+
+// An Excel workbook: the first sheet with a Task (or Name) column, read
+// through the same importer as CSV files
+async function importXlsx(file) {
+  let sheets;
   try {
-    const name = file.name.replace(/\.[^.]+$/, '') || 'Imported plan';
-    const { plan: raw, warnings } = csvToPlan(text, { name, parsePreds: parsePredList, isoDate: csvDate });
+    sheets = await readXlsx(await file.arrayBuffer());
+  } catch (e) {
+    return importFailed(file, e.message);
+  }
+  const sheet = sheets.find(s => findHeaderRow(s.rows) >= 0);
+  if (!sheet) {
+    return importFailed(file, sheets.length
+      ? `No sheet has a “Task” (or “Name”) column. Sheets checked: ${sheets.map(s => `“${s.name}”`).join(', ')}.`
+      : 'The workbook has no sheets.');
+  }
+  const other = sheets.length > 1 ? ` (sheet “${sheet.name}”)` : '';
+  importTable(file, () => rowsToPlan(sheet.rows, { ...importOpts(file), what: `sheet “${sheet.name}”` }), 'an Excel file', other);
+}
+
+function importOpts(file) {
+  return { name: file.name.replace(/\.[^.]+$/, '') || 'Imported plan', parsePreds: parsePredList, isoDate: csvDate };
+}
+
+// Build a new plan from a table, or explain why not
+function importTable(file, build, what, where = '') {
+  try {
+    const { plan: raw, warnings } = build();
     const plan = store.normalize(raw);
     store.savePlan(plan);
     openPlan(plan);
     const n = plan.tasks.length;
-    toast(`Imported ${n} task${n === 1 ? '' : 's'} from “${file.name}” as a new plan.`
+    toast(`Imported ${n} task${n === 1 ? '' : 's'} from “${file.name}”${where} as a new plan.`
       + (warnings.length ? ` Note: ${warnings.join('; ')}.` : '')
-      + ' Holidays and weekend settings are not in a CSV; check Settings.', warnings.length ? 'error' : '');
+      + ` Holidays and weekend settings are not in ${what}; check Settings.`, warnings.length ? 'error' : '');
   } catch (e) {
-    // Explain, and offer a template in the layout the importer reads
-    $('#import-error-msg').textContent = `“${file.name}”: ${e.message}`;
-    $('#dlg-import-error').showModal();
+    importFailed(file, e.message);
   }
 }
+
+// Explain, and offer a template in the layout the importer reads
+// The template matching the failed file's type is listed first.
+function importFailed(file, msg) {
+  $('#import-error-msg').textContent = `“${file.name}”: ${msg}`;
+  const excelFirst = !/\.csv$/i.test(file.name);
+  const [xl, csv] = [$('#btn-xlsx-template'), $('#btn-csv-template')];
+  xl.classList.toggle('primary', excelFirst);
+  csv.classList.toggle('primary', !excelFirst);
+  $('#template-buttons').prepend(excelFirst ? xl : csv);
+  $('#dlg-import-error').showModal();
+}
+
+// Column widths (in Excel character units) for the template's columns
+const TEMPLATE_WIDTHS = [6, 13, 24, 11, 22, 13, 11, 11, 70, 13];
 
 function leaveShared() {
   history.replaceState(null, '', location.pathname + location.search);
@@ -1003,15 +1047,25 @@ function wireEvents() {
     store.downloadText(`${store.safeFilename(state.plan.name)}.json`, store.planToJSON(state.plan));
   });
   // Open menu: each item sets the file picker's filter, then opens it
-  for (const b of [$('#btn-import'), $('#btn-import-csv')]) {
+  const ACCEPT = {
+    json: '.json,application/json',
+    csv: '.csv,text/csv',
+    xlsx: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  };
+  for (const b of [$('#btn-import'), $('#btn-import-xlsx'), $('#btn-import-csv')]) {
     b.addEventListener('click', () => {
-      $('#file-input').accept = b.dataset.kind === 'csv' ? '.csv,text/csv' : '.json,application/json';
+      $('#file-input').accept = ACCEPT[b.dataset.kind];
       $('#file-input').click();
     });
   }
   wireMenu($('#btn-open-menu'), $('#open-menu'));
   $('#btn-csv-template').addEventListener('click', () => {
     store.downloadText('project-planner-template.csv', csvTemplate(), 'text/csv;charset=utf-8');
+    $('#dlg-import-error').close();
+  });
+  $('#btn-xlsx-template').addEventListener('click', () => {
+    const bytes = writeXlsx(TEMPLATE_ROWS, { sheetName: 'Tasks', widths: TEMPLATE_WIDTHS });
+    store.downloadBlob('project-planner-template.xlsx', new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     $('#dlg-import-error').close();
   });
   $('#file-input').addEventListener('change', e => {

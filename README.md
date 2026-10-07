@@ -20,7 +20,7 @@ A browser-based project planner with a task table and a Gantt chart. The Gantt c
 No server is involved. Plans are stored in each user's browser (localStorage).
 
 - **Export → JSON file / Open → JSON file** writes or reads the full plan as JSON, for backups or for moving a plan between machines.
-- **Open → CSV file** builds a new plan from a task table (Excel, Google Sheets, or Export → CSV). A failed import offers a template CSV.
+- **Open → Excel file / CSV file** builds a new plan from a task table (an .xlsx workbook, or CSV from Excel, Google Sheets, or Export → CSV). The .xlsx reader and the small writer used for the template are built in (`js/xlsx.js`, no library). A failed import offers Excel and CSV templates.
 - **Export → Read-only link** puts a compressed, read-only copy of the plan in the URL fragment (`#share=…`). The fragment is never sent to a server. Recipients can save their own editable copy.
 - **Export → CSV file** downloads the task table (WBS, dates, links, float, critical) for spreadsheets; it can be re-imported.
 - **Export → PNG image** downloads the current view (task table, Gantt chart, or PERT diagram) as an image for reports.

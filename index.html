@@ -129,6 +129,7 @@
       <h3>Open</h3>
       <div class="dr-list">
         <button data-proxy="#btn-import">JSON file…</button>
+        <button data-proxy="#btn-import-xlsx">Excel file…</button>
         <button data-proxy="#btn-import-csv">CSV file…</button>
       </div>
     </section>
@@ -149,6 +150,7 @@
   </aside>
   <div id="open-menu" class="menu" role="menu" aria-label="Open" hidden>
     <button role="menuitem" id="btn-import" data-kind="json"><b>JSON file</b><span>A plan saved with Export → JSON file</span></button>
+    <button role="menuitem" id="btn-import-xlsx" data-kind="xlsx"><b>Excel file (.xlsx)</b><span>A task table in an Excel workbook (or one saved from Google Sheets or Numbers)</span></button>
     <button role="menuitem" id="btn-import-csv" data-kind="csv"><b>CSV file</b><span>A task table from Excel, Google Sheets, or Export → CSV</span></button>
   </div>
   <div id="export-menu" class="menu" role="menu" aria-label="Export" hidden>
@@ -216,12 +218,13 @@
   </dialog>
 
   <dialog id="dlg-import-error">
-    <h2>Could not import the CSV file</h2>
+    <h2>Could not import the file</h2>
     <p id="import-error-msg"></p>
     <p>The importer needs a header row naming the columns and one row per task. Only a <strong>Task</strong> (or <strong>Name</strong>) column is required; it also reads Outline level (or WBS), Type, Duration, Predecessors, % complete, Assignee, Notes, and Pinned start. Start, finish, float, and critical are recalculated.</p>
-    <p class="hint">Download the template, fill it in with Excel or Google Sheets, save it as CSV, and use Open → CSV file again.</p>
-    <div class="dlg-buttons">
-      <button id="btn-csv-template" class="primary">Download template CSV</button>
+    <p class="hint">Download a template, fill it in with Excel, Google Sheets, or Numbers, and open it again with Open → Excel file or Open → CSV file. Both templates have the same columns and example rows.</p>
+    <div class="dlg-buttons" id="template-buttons">
+      <button id="btn-xlsx-template" class="primary">Download Excel template</button>
+      <button id="btn-csv-template">Download CSV template</button>
       <button value="close" class="close">Close</button>
     </div>
   </dialog>
@@ -245,7 +248,7 @@
       <li><strong>Settings</strong> (or click the plan name): rename the plan, set the project start date, list holidays (one <code>YYYY-MM-DD</code> per line with an optional label), choose whether Saturdays and Sundays are non-working days (both are by default; changing these reschedules every task), and choose whether the plan includes the Gantt and PERT views.</li>
       <li><strong>Plans</strong>: keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
       <li><strong>Saving</strong>: plans save automatically in this browser only. Use <em>Export → JSON file</em> / <em>Open → JSON file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
-      <li><strong>Open</strong> menu: <em>JSON file</em> opens a plan saved with Export → JSON file (if that plan is already in this browser you can replace it or keep both). <em>CSV file</em> makes a new plan from a task table, such as one built in Excel or Google Sheets or saved with Export → CSV file. The first row must name the columns; only <strong>Task</strong> (or <strong>Name</strong>) is required. It also reads <em>Outline level</em> (or a <em>WBS</em> number like 1.2), <em>Type</em> (Milestone, Summary), <em>Duration</em>, <em>Predecessors</em> (row numbers such as <code>2, 5SS</code>, matched to a <em>Row</em> column if there is one, otherwise to the line order), <em>% complete</em>, <em>Assignee</em>, <em>Notes</em>, and <em>Pinned start</em>. Start and finish are recalculated; the earliest <em>Start</em> in the file becomes the project start. Dates may be YYYY-MM-DD or M/D/YYYY. Holidays and weekend settings are not in a CSV, so check <em>Settings</em> afterwards. If a file can't be read, you are offered a template CSV to fill in.</li>
+      <li><strong>Open</strong> menu: <em>JSON file</em> opens a plan saved with Export → JSON file (if that plan is already in this browser you can replace it or keep both). <em>Excel file</em> and <em>CSV file</em> make a new plan from a task table, such as one built in Excel, Google Sheets, or Numbers, or saved with Export → CSV file. For an Excel workbook, the first sheet with a <strong>Task</strong> column is used; title rows above the column names are skipped; dates, percentages, and formulas are read as Excel shows them. (Old-style <code>.xls</code> files must be saved as <code>.xlsx</code> first.) The column-name row must include <strong>Task</strong> (or <strong>Name</strong>); the importer also reads <em>Outline level</em> (or a <em>WBS</em> number like 1.2), <em>Type</em> (Milestone, Summary), <em>Duration</em>, <em>Predecessors</em> (row numbers such as <code>2, 5SS</code>, matched to a <em>Row</em> column if there is one, otherwise to the order of the tasks), <em>% complete</em>, <em>Assignee</em>, <em>Notes</em>, and <em>Pinned start</em>. Start and finish are recalculated; the earliest <em>Start</em> in the file becomes the project start. Dates may be YYYY-MM-DD or M/D/YYYY. Holidays and weekend settings are not imported, so check <em>Settings</em> afterwards. If a file can't be read, you are offered an Excel or CSV template to fill in.</li>
       <li><strong>Export</strong> menu:
         <ul>
           <li><em>Read-only link…</em> copies a link containing a snapshot of the plan. Recipients can view it and click <em>Save a copy to my plans</em> to edit their own copy. Later edits are not included; share again to send an update. The plan is packed into the link itself, so nothing is uploaded, but very large plans make long links.</li>
@@ -267,7 +270,7 @@
     <p class="hint">Issues are public. Don't attach plans that contain private information.</p>
     <h3>What's new</h3>
     <!-- Bump the version here and add an entry to CHANGELOG.md with each release -->
-    <p>Version <strong id="app-version">1.9.1</strong> (2026-10-06). See the <a href="https://github.com/TUEngr/ProjectPlanner/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a> for what changed in each version.</p>
+    <p>Version <strong id="app-version">1.10.0</strong> (2026-10-07). See the <a href="https://github.com/TUEngr/ProjectPlanner/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a> for what changed in each version.</p>
     <div class="dlg-buttons"><button value="close" class="close primary">Close</button></div>
   </dialog>
 

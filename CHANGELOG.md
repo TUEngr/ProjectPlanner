@@ -4,6 +4,13 @@ What changed in each version of [Project Planner](https://tuengr.github.io/Proje
 
 Version numbers: the middle number goes up for new features, the last number for fixes and smaller improvements.
 
+## 2.0.0-alpha.1 — 2026-10-07
+*Collaborative test version (the `collab` branch, at /ProjectPlanner/collab/). Not the main site.*
+- Shared plans with turn-taking: sign in with a Trinity address, share a plan with people who can edit or only view, and take turns editing with **Start editing** / **Done editing**. Only the person holding the editing lock can change the plan; everyone else sees changes as they are saved.
+- Abandoned locks (no response for 2 minutes) can be taken over; an editor idle for 15 minutes is switched back to viewing; unsaved changes are kept as a local copy if the lock is lost.
+- Test mode only: shared plans are stored in this browser and shared between its tabs and windows. Real accounts and storage (Firebase, Trinity Google sign-in) come next.
+- This version keeps its own browser data, separate from the main site's plans.
+
 ## 1.9.1 — 2026-10-06
 - Near-critical tasks now default to 2 working days of float or less (was 5). Plans that already have a setting keep it; change it in Settings → Critical path.
 

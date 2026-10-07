@@ -14,6 +14,7 @@
   <p>Runs the app in phone-sized frames (the layout's media queries follow the frame size).</p>
   <pre id="out">Running…</pre>
   <script type="module">
+    const { STORAGE_NS } = await import('../js/config.js');
     const results = [];
     const out = document.getElementById('out');
     const check = (ok, msg) => { results.push([!!ok, msg]); out.textContent = results.map(([o, m]) => (o ? 'PASS  ' : 'FAIL  ') + m).join('\n') + '\n…'; };
@@ -32,7 +33,7 @@
 
     try {
       // ---------- landscape (iPhone 15: 844 x 390) ----------
-      localStorage.setItem('projectplanner.prefs', JSON.stringify({ view: 'split', zoom: 'day' }));
+      localStorage.setItem(`${STORAGE_NS}.prefs`, JSON.stringify({ view: 'split', zoom: 'day' }));
       let f = await frame(844, 390);
       let d = f.contentDocument, w = f.contentWindow, $ = s => d.querySelector(s);
       // start from the example plan
@@ -115,7 +116,7 @@
     } catch (e) {
       check(false, `exception: ${e.message}`);
     }
-    localStorage.setItem('projectplanner.prefs', JSON.stringify({ view: 'split', zoom: 'day' }));
+    localStorage.setItem(`${STORAGE_NS}.prefs`, JSON.stringify({ view: 'split', zoom: 'day' }));
     const failed = results.filter(r => !r[0]).length;
     out.innerHTML = results.map(([ok, msg]) => `<span class="${ok ? 'pass' : 'fail'}">${ok ? 'PASS' : 'FAIL'}  ${msg}</span>`)
       .join('\n') + `\n\n${results.length - failed}/${results.length} passed`;

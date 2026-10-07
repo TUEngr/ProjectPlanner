@@ -7,12 +7,14 @@ import { renderTable, renderTableHead, parseDuration, parsePredList, COLUMNS, co
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
+import { STORAGE_NS } from './config.js';
+import * as collab from './collab.js';
 import { planToCSV, csvToPlan, csvTemplate, csvDate } from './csv.js';
 import { tablePrintHTML, tableStandaloneSVG } from './tableexport.js';
 import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 
 const $ = sel => document.querySelector(sel);
-const PREFS_KEY = 'projectplanner.prefs';
+const PREFS_KEY = `${STORAGE_NS}.prefs`;
 const PHONE = window.matchMedia('(max-width: 700px)'); // narrow (portrait phone)
 // Compact layout (drawer instead of toolbars): keep in sync with style.css
 const COMPACT = window.matchMedia('(max-width: 700px), (max-height: 500px)');
@@ -36,6 +38,7 @@ const state = {
   sched: null,
   selectedId: null,
   readOnly: false,
+  readOnlyReason: null, // 'share' (a share link) or 'cloud' (viewing a shared plan)
   colW: {},          // table column widths the user dragged (px), by field
   ganttLabelW: null, // Gantt task-name column width the user dragged, or default
   hidden: new Set(), // ids of rows inside collapsed summaries (recomputed by render)
@@ -184,7 +187,7 @@ function syncDrawer() {
   });
   document.querySelectorAll('#drawer [data-proxy]').forEach(b => {
     const target = $(b.dataset.proxy);
-    if (target) b.disabled = target.disabled;
+    if (target) { b.disabled = target.disabled; b.hidden = target.hidden; }
   });
 }
 
@@ -256,18 +259,58 @@ function wireDrawer() {
 
 // ---------- plan lifecycle ----------
 
-function openPlan(plan, { readOnly = false } = {}) {
+// reason: why it's read-only — 'share' (opened from a share link) or 'cloud'
+// (viewing a shared plan). shared: the plan comes from collab.js.
+function openPlan(plan, { readOnly = false, reason = readOnly ? 'share' : null, shared = false } = {}) {
+  if (!shared && collab.isShared()) collab.leave(); // switching away saves and releases the lock
   state.plan = plan;
   state.readOnly = readOnly;
+  state.readOnlyReason = readOnly ? reason : null;
   state.selectedId = plan.tasks[0]?.id ?? null;
   state.undo = [];
   state.redo = [];
   document.body.classList.toggle('readonly', readOnly);
-  $('#readonly-banner').hidden = !readOnly;
+  document.body.classList.toggle('sharelink', state.readOnlyReason === 'share');
+  document.body.classList.remove('editing-shared');
+  $('#readonly-banner').hidden = state.readOnlyReason !== 'share';
   render({ scrollGantt: true });
 }
 
+// ---------- hooks for shared plans (collab.js) ----------
+const collabHooks = {
+  getPlan: () => state.plan,
+  toast: (m, k) => toast(m, k),
+  newId: () => store.uid(),
+  isShareLinkView: () => state.readOnlyReason === 'share',
+  syncDrawer: () => state.plan && syncDrawer(),
+  // Show a shared plan, viewing (editing starts with the lock)
+  showShared: plan => openPlan(store.normalize(plan), { readOnly: true, reason: 'cloud', shared: true }),
+  openLocal: () => openPlan(loadInitialPlan()),
+  // Switch the open shared plan between viewing and editing. Undo history
+  // starts fresh each editing turn.
+  setEditing(on) {
+    state.readOnly = !on;
+    state.readOnlyReason = on ? null : 'cloud';
+    state.undo = [];
+    state.redo = [];
+    document.body.classList.toggle('readonly', !on);
+    document.body.classList.toggle('editing-shared', on);
+    render();
+  },
+  // Someone else's saved changes: replace the plan, keep the view and selection
+  applyRemote(plan) {
+    state.plan = store.normalize(plan);
+    render();
+  },
+  keepLocalCopy(plan, suffix) {
+    const copy = { ...structuredClone(plan), id: store.uid(), name: plan.name + suffix };
+    store.savePlan(copy);
+    return copy.name;
+  },
+};
+
 function persist() {
+  if (collab.isShared()) return collab.planChanged(); // saved to the shared plan while editing
   if (state.readOnly) return;
   if (!store.savePlan(state.plan)) toast('Could not save to browser storage. Use Export → JSON file to keep your work.', 'error');
 }
@@ -451,7 +494,8 @@ function renderStatus() {
     `<span><b>${leaves.length}</b> tasks, <span class="crit-text">${crit} critical</span>${near ? `, <span class="near-text">${near} near-critical</span>` : ''}</span>`,
     `<span><b>${done}%</b> complete</span>`,
     issues ? `<span class="warn-text">⚠ ${issues} warning${issues > 1 ? 's' : ''}</span>` : '',
-    `<span class="save-state">${state.readOnly ? 'Read-only' : 'Saved in this browser'}</span>`,
+    `<span class="save-state">${collab.isShared() ? `Shared plan · ${collab.isEditing() ? 'editing' : 'viewing'}`
+      : state.readOnly ? 'Read-only' : 'Saved in this browser'}</span>`,
   ].join('');
   $('#dr-status').innerHTML = $('#status').innerHTML;
 }
@@ -694,8 +738,9 @@ function runCommand(cmd) {
 // ---------- dialogs ----------
 
 function showPlans() {
+  collab.renderPlansSection();
   const list = store.listPlans();
-  const current = state.readOnly ? null : state.plan?.id;
+  const current = state.readOnly || collab.isShared() ? null : state.plan?.id;
   $('#plan-list').innerHTML = list.length ? list.map(p => `
     <li data-id="${esc(p.id)}" class="${p.id === current ? 'current' : ''}">
       <button class="link" data-act="open">${esc(p.name)}</button>
@@ -1116,7 +1161,7 @@ async function loadFromHash() {
   if (!location.hash.startsWith('#share=')) return false;
   try {
     const plan = await store.decodeShare(location.hash);
-    openPlan(plan, { readOnly: true });
+    openPlan(plan, { readOnly: true, reason: 'share' });
     return true;
   } catch {
     toast('This share link is damaged or incomplete.', 'error');
@@ -1128,6 +1173,7 @@ async function loadFromHash() {
 
 async function init() {
   loadPrefs();
+  collab.initCollab(collabHooks);
   renderTableHead($('#thead'));
   wireResizing();
   wireEvents();

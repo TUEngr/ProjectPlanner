@@ -8,6 +8,7 @@ import { parsePredList, formatLink } from '../js/table.js';
 import { normalize } from '../js/storage.js';
 import { planToCSV, parseCSV, csvToPlan, csvTemplate, csvDate } from '../js/csv.js';
 import { samplePlan } from '../js/sample.js';
+import { lockStatus, canTakeLock, newLock, canEdit, ROLES, emailAllowed, LOCK_TTL_MS } from '../js/cloud/lock.js';
 
 const results = [];
 function test(name, fn) {
@@ -341,6 +342,21 @@ test('normalize: nearCritical defaults to 2 and is clamped', () => {
   eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: -3 }).nearCritical, 0);
   eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: 'x' }).nearCritical, 2);
   eq(normalize({ start: '2026-10-05', tasks: [], nearCritical: 5 }).nearCritical, 5, 'an existing setting is kept:');
+});
+
+test('editing lock: free, mine, held, stale', () => {
+  const now = 1_000_000;
+  const lock = newLock('s1', { email: 'a@trinity.edu', name: 'A' }, now);
+  eq([lockStatus(null, 's1', now), lockStatus(lock, 's1', now), lockStatus(lock, 's2', now)], ['free', 'mine', 'held']);
+  eq(lockStatus(lock, 's2', now + LOCK_TTL_MS), 'held', 'exactly at the timeout:');
+  eq(lockStatus(lock, 's2', now + LOCK_TTL_MS + 1), 'stale', 'past the timeout:');
+  eq(['free', 'mine', 'held', 'stale'].map(canTakeLock), [true, true, false, true]);
+  eq(ROLES.map(canEdit), [true, true, false]);
+});
+
+test('sign-in limited to the allowed domain', () => {
+  eq(['kn@trinity.edu', ' KN@Trinity.EDU ', 'kn@trinity.edu.evil.com', 'kn@gmail.com', 'kn@nottrinity.edu', '@trinity.edu', 'a b@trinity.edu', null]
+    .map(e => emailAllowed(e, 'trinity.edu')), [true, true, false, false, false, false, false, false]);
 });
 
 test('durationBetween counts working days inclusive', () => {

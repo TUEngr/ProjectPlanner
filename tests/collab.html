@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Project Planner shared-plan tests</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; }
+    .frames { display: flex; gap: 8px; flex-wrap: wrap; }
+    iframe { border: 1px solid #ccc; }
+    .pass { color: #15803d; } .fail { color: #b91c1c; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Shared plans: turn-taking tests</h1>
+  <p>Alice, Bob and Carol each run the app in their own frame (signed in with <code>?testuser=</code>), using the local test backend.</p>
+  <pre id="out">Running…</pre>
+  <div class="frames" id="frames"></div>
+  <script type="module">
+    import { STORAGE_NS, ALLOWED_DOMAIN } from '../js/config.js';
+    import { LocalBackend } from '../js/cloud/local.js';
+
+    const results = [];
+    const out = document.getElementById('out');
+    const check = (ok, msg) => { results.push([!!ok, msg]); out.textContent = results.map(([o, m]) => (o ? 'PASS  ' : 'FAIL  ') + m).join('\n') + '\n…'; };
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    async function until(fn, ms = 3000) { const t = Date.now(); while (Date.now() - t < ms) { if (fn()) return true; await sleep(50); } return !!fn(); }
+
+    // Fresh shared store and local plans for this build only
+    const keysBefore = new Set(Object.keys(localStorage));
+    for (const k of Object.keys(localStorage)) if (k.startsWith(`${STORAGE_NS}.`)) localStorage.removeItem(k);
+
+    async function person(email, extra = '') {
+      const f = document.createElement('iframe');
+      f.width = 900; f.height = 520;
+      f.src = `../index.html?testuser=${encodeURIComponent(email)}${extra}`;
+      document.getElementById('frames').appendChild(f);
+      await new Promise(r => f.addEventListener('load', r, { once: true }));
+      await sleep(400);
+      const w = f.contentWindow, d = f.contentDocument, $ = s => d.querySelector(s);
+      w.confirm = () => true;
+      const p = {
+        f, w, d, $,
+        banner: () => $('#cloud-msg').textContent,
+        bannerShown: () => !$('#cloud-banner').hidden,
+        editing: () => !d.body.classList.contains('readonly') && d.body.classList.contains('editing-shared'),
+        cell: (n, fld) => d.querySelector(`#tbody tr:nth-child(${n}) input[data-f="${fld}"]`),
+        lastToast: () => $('#toast').textContent,
+        async plans() { $('#btn-plans').click(); await until(() => $('#cloud-section').textContent.includes('Shared plans') && !/Running/.test($('#cloud-section').textContent)); await sleep(100); },
+        async edit(n, fld, value) {
+          // Moving focus to another cell commits the edit
+          const el = p.cell(n, fld); el.focus(); el.value = value; p.cell(n, fld === 'notes' ? 'assignee' : 'notes').focus(); await sleep(50);
+        },
+      };
+      return p;
+    }
+
+    try {
+      const alice = await person('alice@trinity.edu');
+      const bob = await person('bob@trinity.edu');
+
+      // ---- Alice shares her plan and gives Bob edit access ----
+      await alice.plans();
+      check(/Signed in as alice@trinity\.edu/.test(alice.$('#cloud-section').textContent) && /Test mode/.test(alice.$('#cloud-section').textContent),
+        'Plans dialog: signed in (test mode notice shown)');
+      const planName = alice.$('#plan-name').textContent;
+      alice.$('[data-cloud="share-current"]').click();
+      await until(() => alice.$('#dlg-members').open);
+      check(alice.$('#dlg-members').open && alice.bannerShown(), `sharing opens the plan as shared and asks who can use it (“${planName}”)`);
+      alice.$('#member-email').value = 'bob@trinity.edu';
+      alice.$('#member-role').value = 'editor';
+      alice.$('#members-form button[value="add"]').click(); await sleep(100);
+      alice.$('#member-email').value = 'eve@gmail.com';
+      alice.$('#members-form button[value="add"]').click(); await sleep(100);
+      check(/trinity\.edu/.test(alice.$('#members-error').textContent), `non-Trinity address refused (“${alice.$('#members-error').textContent}”)`);
+      alice.$('#member-email').value = 'carol@trinity.edu';
+      alice.$('#member-role').value = 'viewer';
+      alice.$('#members-form button[value="add"]').click(); await sleep(100);
+      check(alice.$('#member-list').textContent.includes('bob@trinity.edu') && alice.$('#member-list').textContent.includes('carol@trinity.edu'), 'Bob (edit) and Carol (view) added');
+      alice.$('#dlg-members').close();
+      check(alice.d.body.classList.contains('readonly') && /Viewing shared plan/.test(alice.banner()), 'a shared plan opens for viewing');
+
+      // ---- Bob opens it ----
+      await bob.plans();
+      const li = [...bob.d.querySelectorAll('#cloud-section [data-shared]')].find(l => l.textContent.includes(planName));
+      check(li && /editor/.test(li.textContent), 'Bob sees the plan in Shared plans, as an editor');
+      li.querySelector('[data-cloud="open"]').click();
+      await until(() => bob.bannerShown());
+      check(/Viewing shared plan/.test(bob.banner()) && !bob.$('#btn-cloud-edit').hidden, 'Bob views it, with Start editing available');
+
+      // ---- Alice takes the lock; Bob is locked out ----
+      alice.$('#btn-cloud-edit').click();
+      await until(() => alice.editing());
+      check(alice.editing() && /You are editing/.test(alice.banner()) && alice.$('[data-cmd="add"]').offsetParent !== null, 'Alice: Start editing takes the lock and shows the edit tools');
+      await until(() => /Alice is editing/.test(bob.banner()));
+      check(/Alice is editing/.test(bob.banner()) && bob.$('#btn-cloud-edit').disabled, 'Bob sees “Alice is editing” and can’t start editing');
+      check(bob.cell(2, 'name').readOnly, 'Bob’s table is read-only');
+
+      // ---- Alice’s edits reach Bob ----
+      await alice.edit(2, 'name', 'Define requirements (rev)');
+      await until(() => /Saved/.test(alice.$('#cloud-save')?.textContent || ''), 3000);
+      check(/Saved/.test(alice.$('#cloud-save').textContent), `Alice’s change is saved (“${alice.$('#cloud-save').textContent}”)`);
+      await until(() => bob.cell(2, 'name').value === 'Define requirements (rev)');
+      check(bob.cell(2, 'name').value === 'Define requirements (rev)', 'Bob sees Alice’s change without reloading');
+
+      // ---- Done editing hands over ----
+      alice.$('#btn-cloud-done').click();
+      await until(() => !alice.editing() && !bob.$('#btn-cloud-edit').disabled);
+      check(!alice.editing() && !bob.$('#btn-cloud-edit').disabled && /Viewing shared plan/.test(bob.banner()), 'Done editing releases the lock; Bob can start');
+      bob.$('#btn-cloud-edit').click();
+      await until(() => bob.editing() && /Bob is editing/.test(alice.banner()));
+      check(bob.editing() && /Bob is editing/.test(alice.banner()), 'Bob edits; Alice now sees “Bob is editing”');
+      await bob.edit(3, 'duration', '7');
+      await until(() => alice.cell(3, 'duration').value === '7');
+      check(alice.cell(3, 'duration').value === '7', 'Bob’s change reaches Alice');
+
+      // ---- Stale lock: Bob’s session goes quiet, Alice takes over ----
+      const store = new LocalBackend(STORAGE_NS, ALLOWED_DOMAIN);
+      const planId = Object.keys(localStorage).find(k => k.startsWith(`${STORAGE_NS}.cloud.plan.`)).slice(`${STORAGE_NS}.cloud.plan.`.length);
+      store._ageLock(planId, 5 * 60 * 1000);
+      await until(() => /gone quiet/.test(alice.banner()));
+      check(/gone quiet/.test(alice.banner()) && alice.$('#btn-cloud-edit').textContent === 'Take over editing', 'an abandoned lock is offered for take-over');
+      alice.$('#btn-cloud-edit').click();
+      await until(() => alice.editing() && !bob.editing());
+      check(alice.editing() && !bob.editing() && /Alice is editing/.test(bob.banner()), 'Alice takes over; Bob drops to viewing');
+      check(/Alice is editing now|lost the editing lock/.test(bob.lastToast()), `Bob is told (“${bob.lastToast()}”)`);
+
+      // ---- Losing the lock with unsaved changes keeps them as a local copy ----
+      await alice.edit(4, 'notes', 'unsaved note');
+      const rec = JSON.parse(localStorage.getItem(`${STORAGE_NS}.cloud.plan.${planId}`));
+      rec.meta.lock = { session: 'someone-else', email: 'bob@trinity.edu', name: 'Bob', since: Date.now(), heartbeat: Date.now() };
+      localStorage.setItem(`${STORAGE_NS}.cloud.plan.${planId}`, JSON.stringify(rec));
+      await until(() => !alice.editing());
+      const localNames = Object.keys(localStorage).filter(k => k.startsWith(`${STORAGE_NS}.plan.`)).map(k => JSON.parse(localStorage.getItem(k)).name);
+      check(!alice.editing() && localNames.some(n => /\(unsaved changes\)$/.test(n)), `unsaved work is kept as “${localNames.find(n => /unsaved/.test(n))}”`);
+      // Clear the fake lock
+      rec.meta.lock = null; localStorage.setItem(`${STORAGE_NS}.cloud.plan.${planId}`, JSON.stringify(rec));
+
+      // ---- Viewers can't edit ----
+      const carol = await person('carol@trinity.edu');
+      await carol.plans();
+      [...carol.d.querySelectorAll('#cloud-section [data-shared]')].find(l => l.textContent.includes(planName)).querySelector('[data-cloud="open"]').click();
+      await until(() => carol.bannerShown());
+      check(carol.$('#btn-cloud-edit').hidden && /view only/.test(carol.banner()), 'Carol (viewer) has no Start editing');
+
+      // ---- Idle editing ends by itself ----
+      const dave = await person('alice@trinity.edu', '&idlems=1200&beatms=300');
+      await dave.plans();
+      [...dave.d.querySelectorAll('#cloud-section [data-shared]')].find(l => l.textContent.includes(planName)).querySelector('[data-cloud="open"]').click();
+      await until(() => dave.bannerShown());
+      dave.$('#btn-cloud-edit').click();
+      await until(() => dave.editing());
+      await until(() => !dave.editing(), 4000);
+      check(!dave.editing() && /without activity/.test(dave.lastToast()), 'an idle editor is switched back to viewing and the lock released');
+      check(!JSON.parse(localStorage.getItem(`${STORAGE_NS}.cloud.plan.${planId}`)).meta.lock, 'the lock is free afterwards');
+
+      // ---- Owner deletes it; others are moved off it ----
+      await alice.plans();
+      alice.d.querySelector(`#cloud-section [data-shared="${planId}"] [data-cloud="delete"]`).click();
+      await until(() => !bob.bannerShown());
+      check(!bob.bannerShown() && /deleted/.test(bob.lastToast()), 'when the owner deletes it, Bob is told and returned to his own plans');
+
+      // ---- The collab build never touches the main site's data ----
+      const stray = Object.keys(localStorage).filter(k => !keysBefore.has(k) && !k.startsWith(`${STORAGE_NS}.`));
+      check(stray.length === 0, `all new browser data is under “${STORAGE_NS}.” (stray: ${stray.join(', ') || 'none'})`);
+    } catch (e) {
+      check(false, `exception: ${e.message}`);
+    }
+    const failed = results.filter(r => !r[0]).length;
+    out.innerHTML = results.map(([ok, msg]) => `<span class="${ok ? 'pass' : 'fail'}">${ok ? 'PASS' : 'FAIL'}  ${msg}</span>`)
+      .join('\n') + `\n\n${results.length - failed}/${results.length} passed`;
+  </script>
+</body>
+</html>

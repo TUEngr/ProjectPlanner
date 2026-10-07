@@ -13,7 +13,8 @@
     <button id="btn-drawer" class="hamburger compact-only" aria-label="Menu" aria-controls="drawer" aria-expanded="false">☰</button>
     <div class="brand">Project Planner</div>
     <button id="plan-name" class="plan-name" title="Plan settings">Untitled</button>
-    <span class="ro-chip compact-only readonly-only">Read-only</span>
+    <span class="ro-chip compact-only sharelink-only">Read-only</span>
+    <span id="cloud-chip" class="ro-chip cloud-chip compact-only" hidden></span>
     <nav class="actions">
       <button id="btn-plans" title="Open, create, or delete plans">Plans</button>
       <button id="btn-settings" class="edit-only" title="Project start date and holidays">Settings</button>
@@ -28,6 +29,15 @@
     <span>You are viewing a <strong>read-only shared copy</strong> of this plan.</span>
     <button id="btn-save-copy" class="primary">Save a copy to my plans</button>
     <button id="btn-close-shared">Close</button>
+  </div>
+
+  <!-- Shared plan status: who is editing, and Start / Done editing -->
+  <div id="cloud-banner" class="banner cloud-banner" role="status" hidden>
+    <span id="cloud-msg"></span>
+    <button id="btn-cloud-edit" class="primary">Start editing</button>
+    <button id="btn-cloud-done" class="primary" hidden>Done editing</button>
+    <button id="btn-cloud-members" hidden>Access…</button>
+    <button id="btn-cloud-close">Close</button>
   </div>
 
   <div class="toolbar">
@@ -89,12 +99,22 @@
       <div class="dr-title"><span>Project Planner</span><button class="dr-close" aria-label="Close menu">✕</button></div>
       <div id="dr-plan" class="dr-plan"></div>
       <div id="dr-status" class="dr-status"></div>
-      <div class="readonly-only dr-ro">
+      <div class="sharelink-only dr-ro">
         <p>You are viewing a read-only shared copy.</p>
         <button data-proxy="#btn-save-copy" class="primary">Save a copy to my plans</button>
         <button data-proxy="#btn-close-shared">Close shared plan</button>
       </div>
     </div>
+    <section class="shared-only">
+      <h3>Shared plan</h3>
+      <p id="dr-cloud-msg" class="dr-cloud-msg"></p>
+      <div class="dr-list">
+        <button data-proxy="#btn-cloud-edit">Start editing</button>
+        <button data-proxy="#btn-cloud-done">Done editing</button>
+        <button data-proxy="#btn-cloud-members">Access…</button>
+        <button data-proxy="#btn-cloud-close">Close shared plan</button>
+      </div>
+    </section>
     <section class="edit-only">
       <h3>Edit <span id="dr-sel"></span></h3>
       <div class="dr-grid">
@@ -160,6 +180,7 @@
   </div>
 
   <dialog id="dlg-plans">
+    <section id="cloud-section" class="cloud-section"></section>
     <h2>My plans</h2>
     <p class="hint">Plans are saved automatically in this browser only. Use <em>Export → JSON file</em> to back up a plan or move it to another computer.</p>
     <ul id="plan-list" class="plan-list"></ul>
@@ -226,6 +247,36 @@
     </div>
   </dialog>
 
+  <dialog id="dlg-signin">
+    <form method="dialog" id="signin-form">
+      <h2>Sign in</h2>
+      <p id="signin-test" class="hint">Test mode: there is no real sign-in yet. Enter any @trinity.edu address; open a second window and sign in as someone else to try sharing and the editing lock.</p>
+      <label>Trinity email <input id="signin-email" type="email" autocomplete="email" placeholder="name@trinity.edu" required></label>
+      <p id="signin-error" class="error-text"></p>
+      <div class="dlg-buttons">
+        <button value="signin" class="primary">Sign in</button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-members">
+    <form method="dialog" id="members-form">
+      <h2>Who can use “<span id="members-plan"></span>”</h2>
+      <ul id="member-list" class="member-list"></ul>
+      <label>Add a Trinity person
+        <span class="member-add">
+          <input id="member-email" type="email" placeholder="name@trinity.edu">
+          <select id="member-role" aria-label="Access"><option value="editor">can edit</option><option value="viewer">can view</option></select>
+          <button value="add">Add</button>
+        </span>
+      </label>
+      <p id="members-error" class="error-text"></p>
+      <p class="hint">People who can edit take turns: one person edits at a time, and the others see the changes as they are saved.</p>
+      <div class="dlg-buttons"><button value="close" class="primary" formnovalidate>Done</button></div>
+    </form>
+  </dialog>
+
   <dialog id="dlg-help">
     <h2>Using Project Planner</h2>
     <ul class="help">
@@ -244,6 +295,7 @@
       <li><strong>Gantt chart</strong>: FS arrows run from the end of one bar to the start of the next; SS arrows join the left ends of the bars and FF arrows the right ends. The dark stripe inside a bar is % done, the dashed green line is today, and shaded columns are non-working days. Click a row to select it; double-click a task to edit it in the table (double-clicking a summary collapses it instead).</li>
       <li><strong>Settings</strong> (or click the plan name): rename the plan, set the project start date, list holidays (one <code>YYYY-MM-DD</code> per line with an optional label), choose whether Saturdays and Sundays are non-working days (both are by default; changing these reschedules every task), and choose whether the plan includes the Gantt and PERT views.</li>
       <li><strong>Plans</strong>: keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
+      <li><strong>Shared plans</strong> (test version): open <em>Plans</em> and sign in with your Trinity address to see plans shared with you. <em>Share the open plan…</em> makes a shared copy that you own; <em>Access…</em> lets you add Trinity people who can edit or only view. People take turns editing: click <strong>Start editing</strong> to take the plan's lock, and <strong>Done editing</strong> to hand it back. While someone else edits, you see their changes as they are saved, and you can't change anything. If an editor goes quiet (tab closed, computer asleep) for 2 minutes, someone else can <em>Take over editing</em>; an editor who does nothing for 15 minutes is switched back to viewing automatically. If you ever lose the lock with unsaved changes, they are kept as a separate plan in this browser. <em>In this test version, shared plans are stored in this browser only, so “other people” means other tabs or windows of the same browser.</em></li>
       <li><strong>Saving</strong>: plans save automatically in this browser only. Use <em>Export → JSON file</em> / <em>Open → JSON file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
       <li><strong>Open</strong> menu: <em>JSON file</em> opens a plan saved with Export → JSON file (if that plan is already in this browser you can replace it or keep both). <em>CSV file</em> makes a new plan from a task table, such as one built in Excel or Google Sheets or saved with Export → CSV file. The first row must name the columns; only <strong>Task</strong> (or <strong>Name</strong>) is required. It also reads <em>Outline level</em> (or a <em>WBS</em> number like 1.2), <em>Type</em> (Milestone, Summary), <em>Duration</em>, <em>Predecessors</em> (row numbers such as <code>2, 5SS</code>, matched to a <em>Row</em> column if there is one, otherwise to the line order), <em>% complete</em>, <em>Assignee</em>, <em>Notes</em>, and <em>Pinned start</em>. Start and finish are recalculated; the earliest <em>Start</em> in the file becomes the project start. Dates may be YYYY-MM-DD or M/D/YYYY. Holidays and weekend settings are not in a CSV, so check <em>Settings</em> afterwards. If a file can't be read, you are offered a template CSV to fill in.</li>
       <li><strong>Export</strong> menu:
@@ -267,7 +319,7 @@
     <p class="hint">Issues are public. Don't attach plans that contain private information.</p>
     <h3>What's new</h3>
     <!-- Bump the version here and add an entry to CHANGELOG.md with each release -->
-    <p>Version <strong id="app-version">1.9.1</strong> (2026-10-06). See the <a href="https://github.com/TUEngr/ProjectPlanner/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a> for what changed in each version.</p>
+    <p>Version <strong id="app-version">2.0.0-alpha.1</strong> (2026-10-07, collaborative test version). See the <a href="https://github.com/TUEngr/ProjectPlanner/blob/collab/CHANGELOG.md" target="_blank" rel="noopener">changelog</a> for what changed in each version.</p>
     <div class="dlg-buttons"><button value="close" class="close primary">Close</button></div>
   </dialog>
 

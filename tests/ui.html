@@ -534,7 +534,7 @@
       // Help shows the version and links to the changelog
       const ver = d.getElementById('app-version')?.textContent;
       const clink = [...d.querySelectorAll('#dlg-help a')].find(a => /CHANGELOG\.md$/.test(a.href));
-      check(/^\d+\.\d+\.\d+$/.test(ver || '') && clink, `Help shows version ${ver} and links to the changelog`);
+      check(/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(ver || '') && clink, `Help shows version ${ver} and links to the changelog`);
       const clog = await (await fetch('../CHANGELOG.md')).text();
       check(clog.includes(`## ${ver} — `), `CHANGELOG.md has an entry for version ${ver}`);
 

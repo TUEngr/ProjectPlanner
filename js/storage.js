@@ -4,10 +4,11 @@
 
 import { parseISO, toISO, todayDay, dayOfWeek } from './calendar.js';
 import { linksOf, nearCriticalDays, NEAR_DEFAULT } from './schedule.js';
+import { STORAGE_NS } from './config.js';
 
-const INDEX_KEY = 'projectplanner.index';
-const PLAN_PREFIX = 'projectplanner.plan.';
-const LAST_KEY = 'projectplanner.last';
+const INDEX_KEY = `${STORAGE_NS}.index`;
+const PLAN_PREFIX = `${STORAGE_NS}.plan.`;
+const LAST_KEY = `${STORAGE_NS}.last`;
 export const FORMAT_VERSION = 1;
 
 function lsGet(key) {
@@ -21,7 +22,7 @@ function lsRemove(key) {
 }
 
 export function storageAvailable() {
-  return lsSet('projectplanner.probe', '1') && (lsRemove('projectplanner.probe'), true);
+  return lsSet(`${STORAGE_NS}.probe`, '1') && (lsRemove(`${STORAGE_NS}.probe`), true);
 }
 
 export function listPlans() {

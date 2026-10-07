@@ -4,6 +4,8 @@ A browser-based project planner with a task table and a Gantt chart. The Gantt c
 
 **Live app:** https://tuengr.github.io/ProjectPlanner/
 
+> **This is the `collab` branch**: the collaborative (shared plans, turn-taking) version under development, served at https://tuengr.github.io/ProjectPlanner/collab/. It keeps its browser data separate from the main site's. Phase 1 uses a local test backend (shared between tabs of one browser); phase 2 adds Firebase with Trinity Google sign-in.
+
 ## Features
 
 - Tasks have a duration in working days, predecessors (finish-to-start, start-to-start `SS`, finish-to-finish `FF`), % complete, an assignee, and notes.
@@ -44,3 +46,4 @@ Tests:
 - `tests/index.html` runs the same tests in a browser.
 - `tests/ui.html` drives the real app in an iframe.
 - `tests/mobile.html` checks the phone layout in phone-sized frames (landscape and portrait).
+- `tests/collab.html` plays out shared-plan turn-taking with three test users in separate frames.

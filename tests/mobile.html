@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Project Planner phone layout tests</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; }
+    iframe { border: 1px solid #ccc; display: block; margin: 8px 0; }
+    .pass { color: #15803d; } .fail { color: #b91c1c; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Phone layout tests</h1>
+  <p>Runs the app in phone-sized frames (the layout's media queries follow the frame size).</p>
+  <pre id="out">Running…</pre>
+  <script type="module">
+    const results = [];
+    const out = document.getElementById('out');
+    const check = (ok, msg) => { results.push([!!ok, msg]); out.textContent = results.map(([o, m]) => (o ? 'PASS  ' : 'FAIL  ') + m).join('\n') + '\n…'; };
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    async function frame(w, h, hash = '') {
+      const f = document.createElement('iframe');
+      f.width = w; f.height = h;
+      f.src = `../index.html${hash}`;
+      document.body.appendChild(f);
+      await new Promise(r => f.addEventListener('load', r, { once: true }));
+      await sleep(500);
+      return f;
+    }
+    const visible = el => !!el && el.offsetParent !== null && getComputedStyle(el).visibility !== 'hidden';
+
+    try {
+      // ---------- landscape (iPhone 15: 844 x 390) ----------
+      localStorage.setItem('projectplanner.prefs', JSON.stringify({ view: 'split', zoom: 'day' }));
+      let f = await frame(844, 390);
+      let d = f.contentDocument, w = f.contentWindow, $ = s => d.querySelector(s);
+      // start from the example plan
+      $('#btn-new-sample').click(); await sleep(150);
+      const bar = $('.topbar').getBoundingClientRect().height;
+      check(!visible($('.toolbar')) && !visible($('.statusbar')) && !visible($('.actions')) && visible($('#btn-drawer')),
+        'landscape: toolbars and status bar hidden; ☰ shown');
+      check(bar <= 48, `landscape: app bar is ${Math.round(bar)} px (${Math.round(100 * bar / 390)}% of the screen)`);
+      check($('#main').className === 'view-gantt', `landscape: saved Table/Gantt view becomes Gantt (${$('#main').className})`);
+
+      $('#btn-drawer').click(); await sleep(300);
+      const dr = $('#drawer');
+      check(!dr.hidden && dr.classList.contains('open') && $('#btn-drawer').getAttribute('aria-expanded') === 'true', 'tapping ☰ opens the drawer');
+      const views = [...d.querySelectorAll('#dr-views button')].filter(visible).map(b => b.textContent);
+      check(views.join('|') === 'Table|Gantt|PERT', `landscape: split views not offered (${views.join(', ')})`);
+      check(/Finish/.test($('#dr-status').textContent) && /critical/.test($('#dr-status').textContent), 'drawer header shows the status summary');
+      check($('#dr-plan').textContent === 'Example: senior design project', 'drawer header shows the plan name');
+      check(dr.getBoundingClientRect().height <= 390 && dr.scrollHeight > dr.clientHeight, 'drawer scrolls within the short screen');
+
+      // Edit from the drawer: select row 2, outdent, drawer stays open in landscape
+      $('#scrim').click(); await sleep(300);
+      check(dr.hidden, 'tapping outside closes the drawer');
+      d.querySelector('#gantt-pane .g-row[data-id="2"] .g-label').dispatchEvent(new w.MouseEvent('click', { bubbles: true, detail: 1 }));
+      await sleep(30);
+      $('#btn-drawer').click(); await sleep(300);
+      check(/row 2 Define requirements/.test($('#dr-sel').textContent), `edit section names the selected task ("${$('#dr-sel').textContent}")`);
+      const lvl = () => Number(d.querySelector('#gantt-pane .g-row[data-id="2"] .g-label').getAttribute('x'));
+      const x0 = lvl();
+      d.querySelector('#drawer [data-cmd="outdent"]').click(); await sleep(80);
+      check(lvl() < x0 && !dr.hidden, 'Outdent from the drawer works; drawer stays open in landscape');
+      check(!d.querySelector('#drawer [data-cmd="undo"]').disabled, 'Undo in the drawer is enabled after an edit');
+      d.querySelector('#drawer [data-cmd="undo"]').click(); await sleep(80);
+      check(lvl() === x0, 'Undo from the drawer restores it');
+
+      // View switch closes the drawer
+      d.querySelector('#dr-views [data-goview="pert"]').click(); await sleep(300);
+      check($('#main').className === 'view-pert' && dr.hidden, 'choosing PERT in the drawer switches view and closes it');
+
+      // Proxies: Settings dialog, Esc
+      $('#btn-drawer').click(); await sleep(300);
+      d.querySelector('#drawer [data-proxy="#btn-settings"]').click(); await sleep(300);
+      check($('#dlg-settings').open && dr.hidden, `Settings… opens the settings dialog (open=${$('#dlg-settings').open}, drawer hidden=${dr.hidden})`);
+      $('#dlg-settings').close();
+      $('#btn-drawer').click(); await sleep(300);
+      dr.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(300);
+      check(dr.hidden && d.activeElement === $('#btn-drawer'), `Esc closes the drawer and returns focus to ☰ (hidden=${dr.hidden}, focus=${d.activeElement?.id || d.activeElement?.tagName})`);
+      // PNG item mirrors the desktop control's disabled state
+      check(d.querySelector('#drawer [data-proxy="#btn-png"]').disabled === $('#btn-png').disabled, 'drawer PNG item mirrors availability');
+      f.remove();
+
+      // ---------- portrait (390 x 844) ----------
+      f = await frame(390, 844);
+      d = f.contentDocument; w = f.contentWindow; $ = s => d.querySelector(s);
+      check(!visible($('.toolbar')) && visible($('#btn-drawer')), 'portrait: compact layout too');
+      $('#btn-drawer').click(); await sleep(300);
+      const pviews = [...d.querySelectorAll('#dr-views button')].filter(visible).map(b => b.textContent);
+      check(pviews.includes('Table/Gantt') && pviews.includes('Table/PERT'), `portrait: split views offered (${pviews.join(', ')})`);
+      check($('#drawer').getBoundingClientRect().width <= 390 * 0.87, 'portrait: drawer leaves a strip of the page visible');
+      d.querySelector('#drawer [data-cmd="indent"]').click(); await sleep(300);
+      check($('#drawer').hidden, 'portrait: an edit closes the drawer');
+      d.querySelector('[data-cmd="undo"]').click(); await sleep(60);
+      f.remove();
+
+      // ---------- desktop size is unchanged ----------
+      f = await frame(1200, 800);
+      d = f.contentDocument; $ = s => d.querySelector(s);
+      check(visible($('.toolbar')) && visible($('.actions')) && !visible($('#btn-drawer')), 'desktop: toolbars shown, no ☰');
+      f.remove();
+
+      // ---------- read-only shared view on a phone ----------
+      const { encodeShare } = await import('../js/storage.js');
+      const { samplePlan } = await import('../js/sample.js');
+      f = await frame(844, 390, '#' + await encodeShare(samplePlan()));
+      d = f.contentDocument; $ = s => d.querySelector(s);
+      check(visible($('.ro-chip')), 'shared view: "Read-only" label in the app bar');
+      $('#btn-drawer').click(); await sleep(300);
+      check(!visible(d.querySelector('#drawer section.edit-only')) && visible(d.querySelector('#drawer .dr-ro button')),
+        'shared view: no Edit section; Save a copy offered');
+      f.remove();
+    } catch (e) {
+      check(false, `exception: ${e.message}`);
+    }
+    localStorage.setItem('projectplanner.prefs', JSON.stringify({ view: 'split', zoom: 'day' }));
+    const failed = results.filter(r => !r[0]).length;
+    out.innerHTML = results.map(([ok, msg]) => `<span class="${ok ? 'pass' : 'fail'}">${ok ? 'PASS' : 'FAIL'}  ${msg}</span>`)
+      .join('\n') + `\n\n${results.length - failed}/${results.length} passed`;
+  </script>
+</body>
+</html>

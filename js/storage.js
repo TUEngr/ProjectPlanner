@@ -3,7 +3,7 @@
 // fragment (never sent to any server).
 
 import { parseISO, toISO, todayDay, dayOfWeek } from './calendar.js';
-import { linksOf } from './schedule.js';
+import { linksOf, nearCriticalDays, NEAR_DEFAULT } from './schedule.js';
 
 const INDEX_KEY = 'projectplanner.index';
 const PLAN_PREFIX = 'projectplanner.plan.';
@@ -76,7 +76,7 @@ export function blankTask(id) {
 
 export function newPlan(name = 'Untitled project') {
   return {
-    format: FORMAT_VERSION, id: uid(), name, start: nextMonday(), holidays: [], satOff: true, sunOff: true, showGantt: true, showPert: true,
+    format: FORMAT_VERSION, id: uid(), name, start: nextMonday(), holidays: [], satOff: true, sunOff: true, showGantt: true, showPert: true, nearCritical: NEAR_DEFAULT,
     tasks: [{ ...blankTask(1), name: 'First task', duration: 5 }],
     nextId: 2,
   };
@@ -122,6 +122,7 @@ export function normalize(obj) {
     sunOff: obj.sunOff !== false,
     showGantt: obj.showGantt !== false, // views included (Settings); older plans: all
     showPert: obj.showPert !== false,
+    nearCritical: nearCriticalDays(obj), // plans without one get the default
     tasks,
     nextId: Math.max(next, Number(obj.nextId) || 0),
     updated: obj.updated,

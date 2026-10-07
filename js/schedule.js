@@ -3,6 +3,8 @@
 // Plan model:
 //   { name, start: 'YYYY-MM-DD', holidays: [{date, label}], satOff, sunOff, tasks: [Task] }
 //   satOff / sunOff: every Saturday / Sunday is non-working (default true)
+//   nearCritical: tasks with 0 < float <= this many working days are marked
+//     near-critical (default NEAR_DEFAULT; 0 turns it off)
 //   Task = { id, name, level, duration, preds: [Link], manualStart: 'YYYY-MM-DD'|null,
 //            pct, assignee, notes }
 //   Link = { id, type: 'FS'|'SS'|'FF' } (a bare id is accepted as FS)
@@ -64,7 +66,7 @@ export function schedule(plan) {
       parent: stack.length ? stack[stack.length - 1].id : null,
       children: [], issues: [],
       duration: Math.max(0, Math.round(Number(t.duration) || 0)),
-      pinned: false, es: 0, ef: 0, ls: null, lf: null, float: null, critical: false,
+      pinned: false, es: 0, ef: 0, ls: null, lf: null, float: null, critical: false, near: false,
       preds: [], succs: [], pct: clampPct(t.pct),
     };
     if (r.parent !== null) res.get(r.parent).children.push(t.id);
@@ -131,6 +133,7 @@ export function schedule(plan) {
   const projEndIdx = Math.max(0, ...leaves.map(r => r.ef));
 
   // Backward pass
+  const nearN = nearCriticalDays(plan);
   for (let k = order.length - 1; k >= 0; k--) {
     const r = order[k];
     let latest = projEndIdx;
@@ -139,6 +142,7 @@ export function schedule(plan) {
     r.ls = r.lf - r.duration;
     r.float = r.ls - r.es;
     r.critical = r.float <= 0;
+    r.near = !r.critical && r.float <= nearN;
   }
 
   // Summary rollup, deepest first
@@ -191,6 +195,13 @@ export function hiddenIds(plan, sched) {
     under = r.summary && plan.tasks[i].collapsed ? r.level : null;
   });
   return hidden;
+}
+
+// Near-critical threshold in working days (0 = off)
+export const NEAR_DEFAULT = 2;
+export function nearCriticalDays(plan) {
+  const n = plan.nearCritical === undefined || plan.nearCritical === null ? NEAR_DEFAULT : Number(plan.nearCritical);
+  return Number.isFinite(n) ? Math.max(0, Math.min(999, Math.round(n))) : NEAR_DEFAULT;
 }
 
 const CONFLICT = {

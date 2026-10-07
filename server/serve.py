@@ -170,7 +170,11 @@ def main():
     ap.add_argument('--host', default='127.0.0.1')
     ap.add_argument('--port', type=int, default=8765)
     args = ap.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    try:
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
+    except OSError as e:
+        raise SystemExit(f'Cannot listen on port {args.port} ({e.strerror}). '
+                         'Another copy is probably running; use: bash server/start.sh restart')
     print(f'Project Planner on http://{args.host}:{args.port}')
     server.serve_forever()
 

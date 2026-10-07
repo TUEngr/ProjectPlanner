@@ -6,10 +6,10 @@
     "8765": {
       "label": "Project Planner",
       "visibility": "private",
-      "onAutoForward": "openBrowser"
+      "onAutoForward": "notify"
     }
   },
-  "postAttachCommand": "nohup python3 server/serve.py > /tmp/projectplanner.log 2>&1 &",
+  "postAttachCommand": "bash server/start.sh",
   "customizations": {
     "codespaces": {
       "openFiles": ["README.md"]

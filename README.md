@@ -87,18 +87,27 @@ After that, every push to `main` updates the site by itself. Step 2 is needed be
 
 Without a repository (for example the example site, or opening `index.html` through any web server) the planner works entirely in your browser: no account and nothing is uploaded. Plans are stored in your browser (localStorage).
 
-- **Save file / Open file** writes or reads a JSON file, for backups or for moving a plan between machines.
-- **Share link** puts a compressed, read-only copy of the plan in the URL fragment (`#share=…`). The fragment is never sent to a server. Recipients can save their own editable copy.
-- **Print** prints the Gantt chart, or saves it as a PDF. **Export PNG** saves the chart as an image.
+- **Export → JSON file / Open → JSON file** writes or reads the full plan as JSON, for backups or for moving a plan between machines.
+- **Open → CSV file** builds a new plan from a task table (Excel, Google Sheets, or Export → CSV). A failed import offers a template CSV.
+- **Export → Read-only link** puts a compressed, read-only copy of the plan in the URL fragment (`#share=…`). The fragment is never sent to a server. Recipients can save their own editable copy.
+- **Export → CSV file** downloads the task table (WBS, dates, links, float, critical) for spreadsheets; it can be re-imported.
+- **Export → PNG image** downloads the current view (task table, Gantt chart, or PERT diagram) as an image for reports.
+- **Export → Print** prints the current view, or saves it as a PDF.
 
 Features:
 
-- Tasks have a duration in working days, finish-to-start / start-to-start / finish-to-finish predecessors, % complete, an assignee, and notes.
-- Tasks can be grouped into summary tasks (indent/outdent). A task with zero duration is a milestone.
-- A working-day calendar: weekends are skipped, and each plan has its own holiday list.
+- Tasks have a duration in working days, predecessors (finish-to-start, start-to-start `SS`, finish-to-finish `FF`), % complete, an assignee, and notes.
+- Tasks can be grouped into summary tasks (indent/outdent), collapsed and expanded, and reordered by dragging. A task with zero duration is a milestone.
+- A working-day calendar: each plan has its own holiday list and chooses whether Saturdays and Sundays are worked.
 - Start dates can be pinned manually. If a pinned date conflicts with a predecessor, the pin is kept and the task is flagged with ⚠.
-- Critical path and total float, shown in red.
-- Table, Gantt, PERT and split views, with undo/redo.
+- Critical path and total float, shown in red; near-critical tasks (a little float, set in Settings) in orange.
+- Views: table, Gantt chart, PERT network diagram, and table-plus-chart splits, with undo/redo. A plan can leave out the Gantt or PERT views.
+- Table columns and the Gantt task-name column can be resized by dragging (remembered per browser; exports follow them).
+- On phones the toolbars collapse into a ☰ drawer, leaving the screen to the chart.
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md). The current version is also shown at the bottom of the app's Help; update both with each release.
 
 ## Development
 
@@ -116,9 +125,10 @@ Tests:
 node tests/e2e-repo.cjs       # two people, two clones, two browsers: autosave, Sync, merging, conflicts
 node tests/e2e-merge.cjs      # conflict resolution scenarios
 node tests/e2e-pages.cjs      # the published read-only site
+node tests/e2e-integration.cjs # importing files, Settings and the phone layout in a project repository
 ```
 
-The end-to-end tests need [Playwright](https://playwright.dev) with Chromium; set `PLAYWRIGHT_MODULE` and `PW_CHROMIUM` if they are not found. `tests/index.html` runs the unit tests in a browser and `tests/ui.html` drives the real app in an iframe.
+The end-to-end tests need [Playwright](https://playwright.dev) with Chromium; set `PLAYWRIGHT_MODULE` and `PW_CHROMIUM` if they are not found. `tests/index.html` runs the unit tests in a browser, `tests/ui.html` drives the real app in an iframe, and `tests/mobile.html` checks the phone layout in phone-sized frames.
 
 Layout: `js/` the app (`planfiles.js` and `merge.js` define how a plan is stored and merged, `repo.js` talks to the helper, `site.js` handles the published site), `server/` the helper, `.github/` the Pages workflow and its scripts, `data/` the plan (created on first use).
 

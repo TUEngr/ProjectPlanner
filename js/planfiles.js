@@ -10,6 +10,7 @@
 // stored: they would create diffs and conflicts that carry no project meaning.
 
 import { normalize, FORMAT_VERSION, TASK_ID_RE, RANK_RE } from './storage.js';
+import { nearCriticalDays } from './schedule.js';
 
 export const PLAN_FILE = 'data/plan.json';
 export const TASK_DIR = 'data/tasks/';
@@ -105,6 +106,7 @@ function planObject(plan) {
     sunOff: plan.sunOff !== false, // un-normalized plan saves identically
     showGantt: plan.showGantt !== false,
     showPert: plan.showPert !== false,
+    nearCritical: nearCriticalDays(plan), // same default as normalize()
     holidays: [...(plan.holidays || [])]
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
       .map(h => ({ date: h.date, label: h.label })),

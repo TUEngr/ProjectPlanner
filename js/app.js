@@ -1,27 +1,37 @@
 // Application controller: state, editing commands, persistence, and views.
 
 import { parseISO, toISO } from './calendar.js';
-import { schedule, durationBetween, linksOf, hiddenIds } from './schedule.js';
-import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, esc } from './gantt.js';
-import { renderTable, renderTableHead, parseDuration, parsePredList } from './table.js';
+import { schedule, durationBetween, linksOf, hiddenIds, nearCriticalDays } from './schedule.js';
+import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, esc, LABEL_W } from './gantt.js';
+import { renderTable, renderTableHead, parseDuration, parsePredList, COLUMNS, columnWidths, applyColumnWidths } from './table.js';
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
+import { planToCSV, csvToPlan, csvTemplate, csvDate } from './csv.js';
+import { tablePrintHTML, tableStandaloneSVG } from './tableexport.js';
 import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
 import { RepoApi, RepoSession, repoToken } from './repo.js';
 import { parseSlug, repoUrl, codespacesUrl, pageRepo, pageBundlePath, loadBundle } from './site.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
-const PHONE = window.matchMedia('(max-width: 700px)'); // matches the CSS phone layout
+const PHONE = window.matchMedia('(max-width: 700px)'); // narrow (portrait phone)
+// Compact layout (drawer instead of toolbars): keep in sync with style.css
+const COMPACT = window.matchMedia('(max-width: 700px), (max-height: 500px)');
+const SHORT = window.matchMedia('(max-height: 500px)'); // landscape phone: no room for split views
 const VIEWS = ['table', 'gantt', 'pert', 'split', 'split-pert']; // split = Table/Gantt
 const showsPert = () => state.view === 'pert' || state.view === 'split-pert';
 // Which views a plan includes (Settings). Table is always available.
 const ganttOn = () => state.plan.showGantt !== false;
 const pertOn = () => state.plan.showPert !== false;
-const viewAllowed = v => (v !== 'gantt' && v !== 'split' || ganttOn()) && (v !== 'pert' && v !== 'split-pert' || pertOn());
-// Chart for Print / Export PNG: the one on screen, else whichever is included.
-const chartKind = () => showsPert() ? 'pert' : ganttOn() ? 'gantt' : pertOn() ? 'pert' : null;
+const isSplit = v => v === 'split' || v === 'split-pert';
+const viewAllowed = v => (v !== 'gantt' && v !== 'split' || ganttOn()) && (v !== 'pert' && v !== 'split-pert' || pertOn())
+  && !(SHORT.matches && isSplit(v));
+// What Print / Export → PNG image output: the table on the Table tab, the
+// chart on a chart or split tab, else whichever chart is included.
+const chartKind = () => state.view === 'table' ? 'table'
+  : showsPert() ? 'pert' : ganttOn() ? 'gantt' : pertOn() ? 'pert' : null;
+const KIND_LABEL = { table: 'task table', gantt: 'Gantt chart', pert: 'PERT diagram' };
 
 const state = {
   plan: null,
@@ -31,6 +41,8 @@ const state = {
   repo: null,    // RepoSession when the plan lives in a git clone (served by server/serve.py)
   git: null,     // last git status from the helper
   locked: false, // true while syncing: no edits
+  colW: {},          // table column widths the user dragged (px), by field
+  ganttLabelW: null, // Gantt task-name column width the user dragged, or default
   hidden: new Set(), // ids of rows inside collapsed summaries (recomputed by render)
   view: 'split',
   zoom: 'day',
@@ -45,10 +57,36 @@ function loadPrefs() {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
     if (VIEWS.includes(p.view)) state.view = p.view;
     if (['day', 'week', 'month'].includes(p.zoom)) state.zoom = p.zoom;
+    if (p.colW && typeof p.colW === 'object') state.colW = p.colW;
+    if (Number.isFinite(p.ganttLabelW)) state.ganttLabelW = clampLabelW(p.ganttLabelW);
   } catch { /* defaults */ }
 }
 function savePrefs() {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ view: state.view, zoom: state.zoom })); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ view: state.view, zoom: state.zoom, colW: state.colW, ganttLabelW: state.ganttLabelW }));
+  } catch { /* ignore */ }
+}
+
+// ---------- column widths (per browser) ----------
+const LABEL_MIN = 120, LABEL_MAX = 500;
+const clampLabelW = w => Math.round(Math.min(LABEL_MAX, Math.max(LABEL_MIN, w)));
+// Gantt task-name column: fixed narrow on phones, else the user's or default
+const ganttLabelW = () => (PHONE.matches ? 150 : state.ganttLabelW ?? LABEL_W);
+// Table column widths as drawn on screen (Notes includes the spare width it
+// absorbs), falling back to the configured widths if the table is hidden
+function screenColumnWidths() {
+  const out = columnWidths(state.colW);
+  for (const th of document.querySelectorAll('#thead th[data-col]')) {
+    const w = th.getBoundingClientRect().width;
+    if (w > 0) out[th.dataset.col] = w;
+  }
+  return out;
+}
+// Each table column's on-screen width relative to its default, for exports
+function columnScale() {
+  const w = columnWidths(state.colW), out = {};
+  for (const c of COLUMNS) out[c.f] = w[c.f] / c.w;
+  return out;
 }
 
 // ---------- toast ----------
@@ -91,6 +129,136 @@ function wireTips() {
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); });
 }
 
+// ---------- drop-down menu ----------
+// The menu is positioned under its button but lives at the document level,
+// so the header's sideways scrolling on phones can't clip it.
+
+function wireMenu(button, menu) {
+  const items = () => [...menu.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+  const close = (refocus = false) => {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    if (refocus) button.focus();
+  };
+  const open = () => {
+    hideTip();
+    menu.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    const r = button.getBoundingClientRect(), m = menu.getBoundingClientRect();
+    menu.style.top = `${r.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, Math.min(r.right - m.width, window.innerWidth - m.width - 8))}px`;
+    items()[0]?.focus();
+  };
+  button.addEventListener('click', () => (menu.hidden ? open() : close()));
+  // Choosing an item closes the menu; the item's own handler does the work
+  menu.addEventListener('click', e => { if (e.target.closest('[role="menuitem"]')) close(); });
+  menu.addEventListener('keydown', e => {
+    const list = items(), k = list.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); list[(k + 1) % list.length]?.focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); list[(k - 1 + list.length) % list.length]?.focus(); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(true); }
+    else if (e.key === 'Tab') close();
+  });
+  document.addEventListener('pointerdown', e => {
+    if (!menu.contains(e.target) && !button.contains(e.target)) close();
+  });
+  window.addEventListener('resize', () => close());
+  document.addEventListener('scroll', e => { if (!menu.contains(e.target)) close(); }, true);
+}
+
+// ---------- drawer (compact layout) ----------
+// On phones the toolbars are replaced by a slide-in drawer. Its items either
+// carry data-cmd (handled with the toolbar buttons), data-goview, or
+// data-proxy="#id" to click the matching desktop control, so behaviour is
+// defined once.
+
+function syncDrawerSelection() {
+  const r = state.sched?.byId.get(state.selectedId);
+  const t = state.plan?.tasks.find(x => x.id === state.selectedId);
+  $('#dr-sel').textContent = r ? `· row ${r.row} ${t.name || '(unnamed)'}` : '';
+}
+
+// Mirror the desktop controls' state into the drawer (called from render)
+function syncDrawer() {
+  $('#dr-plan').textContent = state.plan.name;
+  syncDrawerSelection();
+  document.querySelectorAll('#dr-views [data-goview]').forEach(b => {
+    b.hidden = !viewAllowed(b.dataset.goview);
+    b.setAttribute('aria-checked', b.dataset.goview === state.view);
+  });
+  document.querySelectorAll('#drawer [data-proxy]').forEach(b => {
+    const target = $(b.dataset.proxy);
+    if (target) b.disabled = target.disabled;
+  });
+}
+
+function openDrawer() {
+  hideTip();
+  const d = $('#drawer'), s = $('#scrim');
+  d.hidden = s.hidden = false;
+  requestAnimationFrame(() => { d.classList.add('open'); s.classList.add('open'); });
+  $('#btn-drawer').setAttribute('aria-expanded', 'true');
+  d.querySelector('.dr-close').focus();
+}
+function closeDrawer({ refocus = true } = {}) {
+  const d = $('#drawer'), s = $('#scrim');
+  if (d.hidden) return;
+  d.classList.remove('open'); s.classList.remove('open');
+  $('#btn-drawer').setAttribute('aria-expanded', 'false');
+  const done = () => { d.hidden = s.hidden = true; };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) done(); else setTimeout(done, 200);
+  if (refocus) $('#btn-drawer').focus({ preventScroll: true });
+}
+
+function wireDrawer() {
+  const d = $('#drawer');
+  $('#btn-drawer').addEventListener('click', openDrawer);
+  $('#scrim').addEventListener('click', () => closeDrawer());
+  d.querySelector('.dr-close').addEventListener('click', () => closeDrawer());
+  d.addEventListener('click', e => {
+    const b = e.target.closest('button, a');
+    if (!b || b.disabled) return;
+    if (b.dataset.goview) {
+      $(`.tabs button[data-view="${b.dataset.goview}"]`).click();
+      closeDrawer();
+    } else if (b.dataset.proxy) {
+      closeDrawer({ refocus: false }); // dialogs and pickers take focus themselves
+      $(b.dataset.proxy).click();
+    } else if (b.dataset.cmd) {
+      // Edits keep the drawer open in landscape so repeated Indent / Move up
+      // can be watched beside it; in portrait the drawer covers the rows, and
+      // adding a task needs the keyboard on its name.
+      if (PHONE.matches || 'close' in b.dataset) closeDrawer({ refocus: false });
+      else syncDrawerSelection();
+    } else if (b.tagName === 'A') {
+      closeDrawer({ refocus: false });
+    }
+  });
+  d.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); closeDrawer(); return; }
+    if (e.key !== 'Tab') return;
+    // Keep keyboard focus inside the open drawer
+    const f = [...d.querySelectorAll('button, a')].filter(x => !x.disabled && x.offsetParent !== null);
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
+  // Swipe left to close
+  let x0 = null, y0 = 0;
+  d.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  d.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    if (dx < -60 && Math.abs(dy) < Math.abs(dx)) closeDrawer();
+    x0 = null;
+  }, { passive: true });
+  // Leaving the compact layout (rotation, resize) closes it; a short screen
+  // may hide split views, so re-render
+  const relayout = () => { if (!COMPACT.matches) closeDrawer({ refocus: false }); render(); };
+  COMPACT.addEventListener('change', relayout);
+  SHORT.addEventListener('change', relayout);
+}
+
 // ---------- plan lifecycle ----------
 
 function openPlan(plan, { readOnly = false } = {}) {
@@ -111,7 +279,7 @@ function persist() {
     state.repo.markDirty();
     return;
   }
-  if (!store.savePlan(state.plan)) toast('Could not save to browser storage. Use “Save file” to keep your work.', 'error');
+  if (!store.savePlan(state.plan)) toast('Could not save to browser storage. Use Export → JSON file to keep your work.', 'error');
 }
 
 // Wrap every edit: snapshot for undo, mutate, save, re-render.
@@ -177,11 +345,12 @@ function adoptPlan(plan) {
 // The header links to this project's repository, when we know it: from the page
 // (published site) or from the helper (a clone).
 function showRepoLink(repo) {
-  const a = $('#repo-link');
-  if (!repo) { a.hidden = true; return; }
-  a.textContent = repo.slug;
-  a.href = repoUrl(repo);
-  a.hidden = false;
+  for (const a of [$('#repo-link'), $('#dr-repo')]) { // header (desktop) and drawer (phone)
+    if (!repo) { a.hidden = true; continue; }
+    a.textContent = a.id === 'dr-repo' ? `${repo.slug} on GitHub ↗` : repo.slug;
+    a.href = repoUrl(repo);
+    a.hidden = false;
+  }
 }
 
 const dataFiles = g => (g?.dirty || []).filter(p => p.startsWith('data/'));
@@ -343,6 +512,7 @@ function describeValue(c, v) {
     case 'holidays': return `${v.date}${v.label ? ' ' + v.label : ''}`;
     case 'duration': return `${v} day${v === 1 ? '' : 's'}`;
     case 'pct': return `${v}%`;
+    case 'nearCritical': return v === 0 ? 'off' : `${v} working day${v === 1 ? '' : 's'} of float or less`;
     case 'level': return v === 0 ? 'top level' : `indented ${v} level${v > 1 ? 's' : ''}`;
     case 'rank': return 'moved to a different place';
     case 'manualStart': return v || '(not pinned)';
@@ -426,7 +596,7 @@ function openViewer(bundle, repo) {
   $('#viewer-banner').hidden = false;
   if (repo) {
     const b = $('#btn-viewer-edit');
-    b.hidden = false;
+    b.hidden = $('#dr-viewer-edit').hidden = false;
     b.onclick = () => window.open(codespacesUrl(repo), '_blank', 'noopener');
   }
 }
@@ -449,7 +619,7 @@ async function initRepo(token) {
     return showProblem('Cannot open this project', e.message, { reload: true });
   }
   document.body.classList.add('repo-mode');
-  $('#btn-sync').hidden = false;
+  $('#btn-sync').hidden = $('#dr-sync').hidden = false;
   openPlan(applyCollapsed(plan));
   if (created) showSettings();
   refreshGit(true);
@@ -491,7 +661,11 @@ function render({ scrollGantt = false } = {}) {
   document.title = `${plan.name} – Project Planner`;
   // A view this plan excludes falls back to the table (prefs keep the choice
   // for plans that include it)
-  if (!viewAllowed(state.view)) state.view = 'table';
+  if (!viewAllowed(state.view)) {
+    // A split view on a short screen becomes its chart alone; anything else, the table
+    const chart = state.view === 'split' ? 'gantt' : state.view === 'split-pert' ? 'pert' : null;
+    state.view = chart && viewAllowed(chart) ? chart : 'table';
+  }
   $('#main').className = `view-${state.view}`;
   document.querySelectorAll('.tabs button').forEach(b => {
     b.setAttribute('aria-selected', b.dataset.view === state.view);
@@ -502,16 +676,15 @@ function render({ scrollGantt = false } = {}) {
     b.disabled = !kind;
     b.title = kind ? b.dataset.title : 'Turn on Gantt or PERT in Settings to export a chart';
   }
+  $('#png-kind').textContent = kind
+    ? `The ${KIND_LABEL[kind]}${kind === 'gantt' ? ' at the current zoom' : ''}, for reports and slides`
+    : 'No chart: turn on Gantt or PERT in Settings';
+  $('#print-kind').textContent = kind ? `The ${KIND_LABEL[kind]}, or save it as a PDF` : 'No chart: turn on Gantt or PERT in Settings';
   $('#zoom').value = state.zoom;
 
   renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly, hidden: state.hidden });
-  const pane = $('#gantt-pane');
-  const { scrollLeft, scrollTop } = pane;
-  renderGantt(pane, plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden, labelW: PHONE.matches ? 150 : 280 });
-  // Keep the floating zoom control clear of the pane's vertical scrollbar
-  $('#gantt-wrap').style.setProperty('--sbw', `${pane.offsetWidth - pane.clientWidth}px`);
-  if (scrollGantt) scrollToDay(pane, state.sched, state.zoom, state.sched.startDay);
-  else { pane.scrollLeft = scrollLeft; pane.scrollTop = scrollTop; }
+  applyColumnWidths($('table.tasks'), columnWidths(state.colW));
+  drawGantt({ scrollGantt });
   if (showsPert()) {
     const pp = $('#pert-pane');
     const keep = { left: pp.scrollLeft, top: pp.scrollTop };
@@ -526,12 +699,79 @@ function render({ scrollGantt = false } = {}) {
   }
   renderStatus();
   updateUndoButtons();
+  syncDrawer();
+}
+
+// The Gantt pane alone (also redrawn live while its name column is dragged)
+function drawGantt({ scrollGantt = false } = {}) {
+  const pane = $('#gantt-pane');
+  const { scrollLeft, scrollTop } = pane;
+  const LW = ganttLabelW();
+  renderGantt(pane, state.plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden, labelW: LW });
+  // Keep the floating zoom control clear of the pane's vertical scrollbar
+  $('#gantt-wrap').style.setProperty('--sbw', `${pane.offsetWidth - pane.clientWidth}px`);
+  $('#gantt-rs').style.left = `${LW}px`;
+  if (scrollGantt) scrollToDay(pane, state.sched, state.zoom, state.sched.startDay);
+  else { pane.scrollLeft = scrollLeft; pane.scrollTop = scrollTop; }
+}
+
+// Drag a handle to resize; double-click resets. onMove gets the new width
+// (start width + horizontal travel); onEnd runs once on release.
+function dragResize(handle, startWidth, { onMove, onEnd, onReset }) {
+  handle.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation(); // not a row-reorder drag
+    const x0 = e.clientX, w0 = startWidth(handle);
+    let frame = 0, last = w0;
+    try { handle.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    document.body.classList.add('resizing');
+    handle.classList.add('active');
+    const move = ev => {
+      last = w0 + ev.clientX - x0;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => onMove(last));
+    };
+    const up = () => {
+      cancelAnimationFrame(frame);
+      onMove(last);
+      document.body.classList.remove('resizing');
+      handle.classList.remove('active');
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      onEnd();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  handle.addEventListener('dblclick', e => { e.stopPropagation(); onReset(); });
+  handle.addEventListener('click', e => e.stopPropagation());
+}
+
+function wireResizing() {
+  const table = $('table.tasks');
+  for (const h of document.querySelectorAll('#thead .col-rs')) {
+    const f = h.dataset.col;
+    dragResize(h, () => h.parentElement.getBoundingClientRect().width, {
+      onMove: w => { state.colW[f] = w; applyColumnWidths(table, columnWidths(state.colW)); },
+      onEnd: () => { state.colW[f] = columnWidths(state.colW)[f]; savePrefs(); },
+      onReset: () => { delete state.colW[f]; applyColumnWidths(table, columnWidths(state.colW)); savePrefs(); },
+    });
+  }
+  dragResize($('#gantt-rs'), () => ganttLabelW(), {
+    onMove: w => { state.ganttLabelW = clampLabelW(w); drawGantt(); },
+    onEnd: savePrefs,
+    onReset: () => { state.ganttLabelW = null; drawGantt(); savePrefs(); },
+  });
 }
 
 function renderStatus() {
   const s = state.sched;
   const leaves = s.rows.filter(r => !r.summary);
   const crit = leaves.filter(r => r.critical).length;
+  const near = leaves.filter(r => r.near).length;
   const issues = s.rows.filter(r => r.issues.length).length;
   const done = leaves.length
     ? Math.round(leaves.reduce((a, r) => a + r.pct * Math.max(r.duration, 1), 0) / leaves.reduce((a, r) => a + Math.max(r.duration, 1), 0))
@@ -540,16 +780,17 @@ function renderStatus() {
     `<span><b>Start</b> ${fmtDate(s.start)}</span>`,
     `<span><b>Finish</b> ${fmtDate(s.finish)}</span>`,
     `<span><b>${s.workdays}</b> working days</span>`,
-    `<span><b>${leaves.length}</b> tasks, <span class="crit-text">${crit} critical</span></span>`,
+    `<span><b>${leaves.length}</b> tasks, <span class="crit-text">${crit} critical</span>${near ? `, <span class="near-text">${near} near-critical</span>` : ''}</span>`,
     `<span><b>${done}%</b> complete</span>`,
     issues ? `<span class="warn-text">⚠ ${issues} warning${issues > 1 ? 's' : ''}</span>` : '',
     `<span class="save-state">${state.readOnly ? 'Read-only' : state.repo ? repoSaveText() : 'Saved in this browser'}</span>`,
   ].join('');
+  $('#dr-status').innerHTML = $('#status').innerHTML;
 }
 
 function updateUndoButtons() {
-  document.querySelector('[data-cmd="undo"]').disabled = !state.undo.length;
-  document.querySelector('[data-cmd="redo"]').disabled = !state.redo.length;
+  document.querySelectorAll('[data-cmd="undo"]').forEach(b => { b.disabled = !state.undo.length; });
+  document.querySelectorAll('[data-cmd="redo"]').forEach(b => { b.disabled = !state.redo.length; });
 }
 
 function fmtDate(iso) {
@@ -569,6 +810,7 @@ function select(id) {
     .forEach(el => el.classList.add('selected'));
   document.querySelectorAll('#pert-pane .pt-node.selected').forEach(el => el.classList.remove('selected'));
   document.querySelector(`#pert-pane .pt-node[data-id="${id}"]`)?.classList.add('selected');
+  syncDrawerSelection();
 }
 
 // ---------- cell edits ----------
@@ -803,6 +1045,7 @@ function showSettings() {
   f.satOff.checked = state.plan.satOff !== false;
   f.showGantt.checked = ganttOn();
   f.showPert.checked = pertOn();
+  f.nearCritical.value = nearCriticalDays(state.plan);
   f.sunOff.checked = state.plan.sunOff !== false;
   $('#dlg-settings').showModal();
 }
@@ -828,13 +1071,14 @@ function saveSettings() {
     plan.satOff = f.satOff.checked;
     plan.showGantt = f.showGantt.checked;
     plan.showPert = f.showPert.checked;
+    plan.nearCritical = nearCriticalDays({ nearCritical: f.nearCritical.value === '' ? 0 : f.nearCritical.value });
     plan.sunOff = f.sunOff.checked;
   });
   if (bad.length) toast(`Ignored ${bad.length} line(s) that did not start with a YYYY-MM-DD date.`, 'error');
 }
 
 async function showShare() {
-  if (!('CompressionStream' in window)) return toast('This browser cannot create share links. Use “Save file” instead.', 'error');
+  if (!('CompressionStream' in window)) return toast('This browser cannot create share links. Use Export → JSON file instead.', 'error');
   try {
     const frag = await store.encodeShare(state.plan);
     const url = `${location.origin}${location.pathname}#${frag}`;
@@ -853,7 +1097,9 @@ function printGantt() {
   const s = state.sched;
   $('#print-area').innerHTML = `<div class="print-title"><h1>${esc(state.plan.name)}</h1>
     <p>${fmtDate(s.start)} – ${fmtDate(s.finish)} · ${s.workdays} working days · Critical path in red · Printed ${new Date().toLocaleDateString()}</p></div>
-    ${chartKind() === 'pert' ? pertPrintSVG(state.plan, s, state.hidden) : ganttPrintSVG(state.plan, s, state.zoom, state.hidden)}`;
+    ${{ table: () => tablePrintHTML(state.plan, s, state.hidden, screenColumnWidths()),
+        pert: () => pertPrintSVG(state.plan, s, state.hidden),
+        gantt: () => ganttPrintSVG(state.plan, s, state.zoom, state.hidden, state.ganttLabelW ?? LABEL_W) }[chartKind()]()}`;
   document.documentElement.dataset.theme = 'light'; // print in light colors even in dark mode
   window.print();
 }
@@ -869,7 +1115,7 @@ function chartExportCSS() {
     if (root[k].startsWith('--')) vars[root[k]] = root.getPropertyValue(root[k]).trim();
   }
   return rules
-    .filter(r => r.selectorText.split(',').every(s => /^\.(g|pt)-/.test(s.trim())))
+    .filter(r => r.selectorText.split(',').every(s => /^\.(g|pt|tx)-/.test(s.trim())))
     .map(r => r.cssText.replace(/var\((--[\w-]+)\)/g, (m, v) => vars[v] ?? m))
     .join('\n');
 }
@@ -880,10 +1126,10 @@ const PNG_MAX_PIXELS = 16e6, PNG_MAX_SIDE = 16000;
 
 async function exportPNG() {
   if (!chartKind()) return;
-  const pert = chartKind() === 'pert';
-  const { svg, width, height } = pert
-    ? pertStandaloneSVG(state.plan, state.sched, chartExportCSS(), state.hidden)
-    : ganttStandaloneSVG(state.plan, state.sched, state.zoom, chartExportCSS(), state.hidden);
+  const kind = chartKind(), css = chartExportCSS();
+  const { svg, width, height } = kind === 'table' ? tableStandaloneSVG(state.plan, state.sched, css, state.hidden, columnScale())
+    : kind === 'pert' ? pertStandaloneSVG(state.plan, state.sched, css, state.hidden)
+    : ganttStandaloneSVG(state.plan, state.sched, state.zoom, css, state.hidden, state.ganttLabelW ?? LABEL_W);
   const scale = Math.min(2, PNG_MAX_SIDE / width, PNG_MAX_SIDE / height, Math.sqrt(PNG_MAX_PIXELS / (width * height)));
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   try {
@@ -898,7 +1144,7 @@ async function exportPNG() {
     ctx.drawImage(img, 0, 0, width, height);
     const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
     if (!blob) throw new Error('the browser could not encode the image');
-    store.downloadBlob(`${store.safeFilename(state.plan.name)}-${pert ? 'pert' : 'gantt'}.png`, blob);
+    store.downloadBlob(`${store.safeFilename(state.plan.name)}-${kind}.png`, blob);
     toast(scale < 1
       ? `Chart is very large, so it was exported at reduced resolution (${canvas.width}×${canvas.height}). Try a coarser zoom.`
       : `Exported ${canvas.width}×${canvas.height} PNG at the current zoom.`);
@@ -909,19 +1155,39 @@ async function exportPNG() {
   }
 }
 
+// In a project repository an imported file replaces the project's plan (git keeps the old
+// version, and Undo works). A CSV carries only tasks, so the project's own name, holidays and
+// settings are kept; a JSON file is a whole plan and replaces everything but the plan's id.
+function replaceProjectPlan(plan, { source, tasksOnly }) {
+  const cur = state.plan;
+  if (tasksOnly) {
+    Object.assign(plan, { name: cur.name, holidays: cur.holidays, satOff: cur.satOff, sunOff: cur.sunOff, showGantt: cur.showGantt, showPert: cur.showPert, nearCritical: cur.nearCritical });
+  }
+  const question = tasksOnly
+    ? `Replace all ${cur.tasks.length} tasks in this project with the ${plan.tasks.length} from ${source}?\n\nThe project name, holidays and settings are kept. Git keeps the previous version, and Undo is available.`
+    : `Replace this project's plan with “${plan.name}” from ${source}?\n\nGit keeps the previous version, and Undo is available.`;
+  if (!confirm(question)) return false;
+  plan.id = cur.id;
+  state.undo.push(JSON.stringify(cur));
+  state.redo = [];
+  state.plan = plan;
+  state.selectedId = plan.tasks[0]?.id ?? null;
+  applyCollapsed(plan);
+  persist();
+  render({ scrollGantt: true });
+  return true;
+}
+
 async function importFile(file) {
+  const text = await file.text();
+  // Go by content rather than the menu item, so a mislabelled file still opens
+  const isJSON = /^\s*\{/.test(text.replace(/^\uFEFF/, ''));
+  if (!isJSON) return importCSV(file, text);
   try {
-    const plan = store.normalize(JSON.parse(await file.text()));
-    if (state.repo) { // replace this project's plan; git keeps the old version
-      if (!confirm(`Replace this project's plan with “${plan.name}” from the file?\n\nGit keeps the previous version, and Undo is available.`)) return;
-      plan.id = state.plan.id;
-      state.undo.push(JSON.stringify(state.plan));
-      state.redo = [];
-      state.plan = plan;
-      state.selectedId = plan.tasks[0]?.id ?? null;
-      persist();
-      render({ scrollGantt: true });
-      return toast(`Replaced the plan with “${plan.name}”.`);
+    const plan = store.normalize(JSON.parse(text));
+    if (state.repo) {
+      if (replaceProjectPlan(plan, { source: `“${file.name}”`, tasksOnly: false })) toast(`Replaced the plan with “${plan.name}”.`);
+      return;
     }
     if (store.listPlans().some(p => p.id === plan.id)) {
       if (!confirm(`A plan with this ID (“${store.loadPlan(plan.id)?.name}”) already exists in this browser.\n\nOK = replace it with the file\nCancel = keep both (import as a copy)`)) {
@@ -934,6 +1200,31 @@ async function importFile(file) {
     toast(`Opened “${plan.name}”.`);
   } catch (e) {
     toast(e instanceof SyntaxError ? 'That file is not valid JSON.' : e.message, 'error');
+  }
+}
+
+// A CSV becomes a new plan (it has no plan id, holidays, or settings).
+function importCSV(file, text) {
+  try {
+    const name = file.name.replace(/\.[^.]+$/, '') || 'Imported plan';
+    const { plan: raw, warnings } = csvToPlan(text, { name, parsePreds: parsePredList, isoDate: csvDate });
+    const plan = store.normalize(raw);
+    const n = plan.tasks.length;
+    if (state.repo) {
+      if (replaceProjectPlan(plan, { source: `“${file.name}”`, tasksOnly: true })) {
+        toast(`Replaced the tasks with ${n} from “${file.name}”.${warnings.length ? ` Note: ${warnings.join('; ')}.` : ''} Start date comes from the file; check Settings.`, warnings.length ? 'error' : '');
+      }
+      return;
+    }
+    store.savePlan(plan);
+    openPlan(plan);
+    toast(`Imported ${n} task${n === 1 ? '' : 's'} from “${file.name}” as a new plan.`
+      + (warnings.length ? ` Note: ${warnings.join('; ')}.` : '')
+      + ' Holidays and weekend settings are not in a CSV; check Settings.', warnings.length ? 'error' : '');
+  } catch (e) {
+    // Explain, and offer a template in the layout the importer reads
+    $('#import-error-msg').textContent = `“${file.name}”: ${e.message}`;
+    $('#dlg-import-error').showModal();
   }
 }
 
@@ -956,6 +1247,7 @@ function loadInitialPlan() {
 
 function wireEvents() {
   wireTips();
+  wireDrawer();
   const tbody = $('#tbody');
 
   tbody.addEventListener('focusin', e => {
@@ -1101,13 +1393,28 @@ function wireEvents() {
   $('#btn-export').addEventListener('click', () => {
     store.downloadText(`${store.safeFilename(state.plan.name)}.json`, store.planToJSON(state.plan));
   });
-  $('#btn-import').addEventListener('click', () => $('#file-input').click());
+  // Open menu: each item sets the file picker's filter, then opens it
+  for (const b of [$('#btn-import'), $('#btn-import-csv')]) {
+    b.addEventListener('click', () => {
+      $('#file-input').accept = b.dataset.kind === 'csv' ? '.csv,text/csv' : '.json,application/json';
+      $('#file-input').click();
+    });
+  }
+  wireMenu($('#btn-open-menu'), $('#open-menu'));
+  $('#btn-csv-template').addEventListener('click', () => {
+    store.downloadText('project-planner-template.csv', csvTemplate(), 'text/csv;charset=utf-8');
+    $('#dlg-import-error').close();
+  });
   $('#file-input').addEventListener('change', e => {
     const file = e.target.files[0];
     e.target.value = '';
     if (file) importFile(file);
   });
   $('#btn-share').addEventListener('click', showShare);
+  $('#btn-csv').addEventListener('click', () => {
+    store.downloadText(`${store.safeFilename(state.plan.name)}.csv`, planToCSV(state.plan, state.sched), 'text/csv;charset=utf-8');
+  });
+  wireMenu($('#btn-export-menu'), $('#export-menu'));
   $('#btn-print').addEventListener('click', printGantt);
   $('#btn-png').addEventListener('click', exportPNG);
   $('#btn-help').addEventListener('click', () => {
@@ -1134,7 +1441,7 @@ function wireEvents() {
       $('#dlg-plans').close();
     } else if (act === 'delete') {
       const p = store.loadPlan(id);
-      if (!confirm(`Delete “${p?.name ?? 'this plan'}” from this browser? This cannot be undone.\n\nTip: use “Save file” first if you want a backup.`)) return;
+      if (!confirm(`Delete “${p?.name ?? 'this plan'}” from this browser? This cannot be undone.\n\nTip: use Export → JSON file first if you want a backup.`)) return;
       store.deletePlan(id);
       if (!state.readOnly && state.plan.id === id) openPlan(loadInitialPlan());
       showPlans();
@@ -1213,9 +1520,10 @@ async function loadFromHash() {
 async function init() {
   loadPrefs();
   renderTableHead($('#thead'));
+  wireResizing();
   wireEvents();
   if (!store.storageAvailable()) {
-    toast('Browser storage is unavailable (private mode?). Use “Save file” to keep your work.', 'error');
+    toast('Browser storage is unavailable (private mode?). Use Export → JSON file to keep your work.', 'error');
   }
   const token = repoToken();
   if (token) return initRepo(token);

@@ -15,11 +15,11 @@ export const LABELS = {
   rank: 'Position in the list', name: 'Name', level: 'Indent level', duration: 'Duration (days)',
   manualStart: 'Pinned start date', pct: '% complete', assignee: 'Assignee', notes: 'Notes',
   preds: 'Predecessor', start: 'Project start', satOff: 'Saturdays off', sunOff: 'Sundays off',
-  showGantt: 'Gantt view', showPert: 'PERT view', holidays: 'Holiday',
+  showGantt: 'Gantt view', showPert: 'PERT view', nearCritical: 'Near-critical threshold (days)', holidays: 'Holiday',
 };
 const SCALARS = {
   task: ['rank', 'name', 'level', 'duration', 'manualStart', 'pct', 'assignee', 'notes'],
-  plan: ['name', 'start', 'satOff', 'sunOff', 'showGantt', 'showPert'],
+  plan: ['name', 'start', 'satOff', 'sunOff', 'showGantt', 'showPert', 'nearCritical'],
 };
 const KEYED = { task: { preds: 'id' }, plan: { holidays: 'date' } };
 

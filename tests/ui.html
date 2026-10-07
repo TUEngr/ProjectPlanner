@@ -168,11 +168,32 @@
       check(!tab('gantt').hidden && !tab('split').hidden && tab('pert').hidden && tab('split-pert').hidden,
         'Include PERT off hides PERT and Table/PERT tabs only');
       await settings(false, false);
-      check(d.getElementById('btn-png').disabled && d.getElementById('btn-print').disabled, 'with no charts, Export PNG and Print are disabled');
+      check(!d.getElementById('btn-png').disabled && !d.getElementById('btn-print').disabled && /task table/.test(d.getElementById('png-kind').textContent),
+        'with no charts, PNG and Print stay available and output the table');
       await click('undo'); await click('undo'); await click('undo');
       check(['table', 'gantt', 'pert', 'split', 'split-pert'].every(v => !tab(v).hidden) && !d.getElementById('btn-png').disabled,
         'undo restores all views');
       tab('split').click(); await sleep(60);
+
+      // ---- Near-critical ----
+      // A row is near-critical exactly when its Float is 1..threshold
+      const nearMatches = n => [...d.querySelectorAll('#tbody tr[data-id]:not(.summary)')].every(tr => {
+        const f = Number(tr.querySelector('.c-float').textContent);
+        return tr.classList.contains('near') === (f > 0 && f <= n);
+      });
+      const nearCount = () => d.querySelectorAll('#tbody tr.near').length;
+      const statusNear = () => (/(\d+) near-critical/.exec(d.getElementById('status').textContent) || [0, '0'])[1];
+      check(nearMatches(2) && statusNear() === String(nearCount()),
+        `rows with float 1–2 are near-critical (${nearCount()}) and the status bar agrees (${statusNear()})`);
+      d.getElementById('btn-settings').click(); await sleep(40);
+      check(d.getElementById('settings-form').nearCritical.value === '2', 'Settings shows the default near-critical threshold (2)');
+      d.getElementById('settings-form').nearCritical.value = '20';
+      d.getElementById('settings-form').querySelector('button[value="save"]').click(); await sleep(80);
+      check(nearMatches(20) && d.querySelectorAll('#gantt-pane .g-bar.near').length + d.querySelectorAll('#gantt-pane .g-milestone.near').length === nearCount(),
+        `raising it to 20 marks every task with float 1–20 (${nearCount()}), and the Gantt matches`);
+      check(nearCount() > 0 && statusNear() === String(nearCount()), 'status bar counts them');
+      await click('undo');
+      check(nearMatches(2), 'undo restores the threshold');
 
       // ---- Reordering ----
       d.querySelector('.tabs button[data-view="split"]').click();
@@ -278,6 +299,123 @@
       await sleep(60);
       check(count() === rowsBefore, 'single click on the triangle expands');
 
+      // ---- Export menu ----
+      const menuBtn = d.getElementById('btn-export-menu'), menu = d.getElementById('export-menu');
+      check(!d.querySelector('.actions #btn-png') && !d.querySelector('.actions #btn-share') && !d.querySelector('.actions #btn-export'),
+        'Save file / Share link / Export PNG buttons replaced by the Export menu');
+      menuBtn.click(); await sleep(30);
+      const items = [...menu.querySelectorAll('[role="menuitem"]')].map(b => b.querySelector('b').textContent);
+      check(!menu.hidden && menuBtn.getAttribute('aria-expanded') === 'true' && items.join('|') === 'Read-only link…|JSON file|CSV file|PNG image|Print…',
+        `Export menu opens with 5 items (${items.join(', ')})`);
+      check(!d.querySelector('.actions #btn-print') && d.querySelector('#export-menu #btn-print'), 'Print moved from the header into the Export menu');
+      check(d.activeElement === menu.querySelector('#btn-share'), 'first item is focused');
+      menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      check(d.activeElement?.id === 'btn-export', 'ArrowDown moves to the next item');
+      menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      check(menu.hidden && d.activeElement === menuBtn, 'Escape closes the menu and returns focus');
+      menuBtn.click(); await sleep(30);
+      d.body.dispatchEvent(new w.PointerEvent('pointerdown', { bubbles: true }));
+      check(menu.hidden, 'clicking outside closes the menu');
+      const grab = ext => new Promise(resolve => {
+        const oc = w.HTMLAnchorElement.prototype.click, ou = w.URL.createObjectURL;
+        let blob = null;
+        w.URL.createObjectURL = b => { blob = b; return ou.call(w.URL, b); };
+        w.HTMLAnchorElement.prototype.click = function () {
+          if (!this.download.endsWith(ext)) return oc.call(this);
+          w.HTMLAnchorElement.prototype.click = oc; w.URL.createObjectURL = ou;
+          resolve({ name: this.download, blob });
+        };
+      });
+      menuBtn.click(); await sleep(30);
+      let got = grab('.csv');
+      menu.querySelector('#btn-csv').click();
+      let dlc = await Promise.race([got, sleep(3000).then(() => null)]);
+      const text = dlc ? await dlc.blob.text() : '';
+      // text() drops the byte-order mark, so check the raw bytes for it
+      const bom = dlc ? [...new Uint8Array(await dlc.blob.slice(0, 3).arrayBuffer())].join() === '239,187,191' : false;
+      check(menu.hidden && dlc && /\.csv$/.test(dlc.name) && text.split('\r\n')[0].startsWith('WBS,Row,') && bom && text.includes('Firmware'),
+        `CSV file downloads the task table (${dlc?.name}, ${text.split('\r\n').length - 2} task rows)`);
+      menuBtn.click(); await sleep(30);
+      got = grab('.json');
+      menu.querySelector('#btn-export').click();
+      dlc = await Promise.race([got, sleep(3000).then(() => null)]);
+      const js = dlc ? JSON.parse(await dlc.blob.text()) : null;
+      check(js && Array.isArray(js.tasks) && js.tasks.some(t => t.name === 'Firmware'), `JSON file downloads the plan (${dlc?.name})`);
+      menuBtn.click(); await sleep(30);
+      menu.querySelector('#btn-share').click(); await sleep(300);
+      check(d.getElementById('dlg-share').open && /#share=/.test(d.getElementById('share-url').value || d.getElementById('share-url').textContent),
+        'Read-only link opens the share dialog with a link');
+      d.getElementById('dlg-share').close();
+
+      // ---- Open menu: CSV / JSON import ----
+      const openBtn = d.getElementById('btn-open-menu'), openMenu = d.getElementById('open-menu');
+      openBtn.click(); await sleep(30);
+      check(!openMenu.hidden && [...openMenu.querySelectorAll('[role="menuitem"] b')].map(b => b.textContent).join('|') === 'JSON file|CSV file',
+        'Open menu offers JSON file and CSV file');
+      d.getElementById('btn-import-csv').click(); await sleep(20);
+      check(openMenu.hidden && d.getElementById('file-input').accept.includes('.csv'), 'CSV item opens a CSV file picker');
+      const feed = async (name, text) => {
+        const dt = new w.DataTransfer();
+        dt.items.add(new w.File([text], name, { type: 'text/csv' }));
+        const inp = d.getElementById('file-input');
+        inp.files = dt.files;
+        inp.dispatchEvent(new w.Event('change', { bubbles: true }));
+        await sleep(150);
+      };
+      const planBefore = d.getElementById('plan-name').textContent;
+      await feed('Garden.csv', 'WBS,Task,Duration,Predecessors\n1,Prep,,\n1.1,Dig beds,3,\n1.2,Plant,2,2SS\n2,Harvest,0,3\n');
+      check(d.getElementById('plan-name').textContent === 'Garden' && count() === 4 && row(1).classList.contains('summary')
+        && cell(3, 'preds').value === '2SS' && cell(4, 'duration').value === '0',
+        `valid CSV opens as a new plan (${d.getElementById('plan-name').textContent}, ${count()} rows)`);
+      await feed('junk.csv', 'Foo,Bar\n1,2\n');
+      const errDlg = d.getElementById('dlg-import-error');
+      check(errDlg.open && /junk\.csv/.test(d.getElementById('import-error-msg').textContent) && /Task/.test(d.getElementById('import-error-msg').textContent),
+        `bad CSV shows an error dialog ("${d.getElementById('import-error-msg').textContent}")`);
+      check(d.getElementById('plan-name').textContent === 'Garden', 'failed import leaves the current plan open');
+      const tpl = new Promise(resolve => {
+        const oc = w.HTMLAnchorElement.prototype.click, ou = w.URL.createObjectURL;
+        let blob = null;
+        w.URL.createObjectURL = b => { blob = b; return ou.call(w.URL, b); };
+        w.HTMLAnchorElement.prototype.click = function () { w.HTMLAnchorElement.prototype.click = oc; w.URL.createObjectURL = ou; resolve({ name: this.download, blob }); };
+      });
+      d.getElementById('btn-csv-template').click();
+      const tdl = await Promise.race([tpl, sleep(3000).then(() => null)]);
+      const ttext = tdl ? await tdl.blob.text() : '';
+      check(tdl && tdl.name === 'project-planner-template.csv' && ttext.startsWith('Row,Outline level,Task') && !errDlg.open,
+        'error dialog downloads the template CSV and closes');
+      await feed('template.csv', ttext);
+      check(d.getElementById('plan-name').textContent === 'template' && count() === 6, 'the template itself imports (6 rows)');
+      // JSON still opens through the same picker
+      await feed('rt.json', JSON.stringify({ name: 'From JSON', start: '2026-10-05', tasks: [{ id: 1, name: 'Only task', duration: 2, preds: [] }] }));
+      check(d.getElementById('plan-name').textContent === 'From JSON' && count() === 1, 'JSON file still opens');
+      // Back to the example plan used by the remaining tests
+      d.getElementById('btn-plans').click(); await sleep(40);
+      const li = [...d.querySelectorAll('#plan-list li')].find(l => l.textContent.includes(planBefore));
+      li?.querySelector('[data-act="open"]').click(); await sleep(100);
+      check(d.getElementById('plan-name').textContent === planBefore, `reopened “${planBefore}” for the remaining tests`);
+
+      // ---- Export / Print on the Table tab output the table ----
+      d.querySelector('.tabs button[data-view="table"]').click(); await sleep(60);
+      check(/task table/.test(d.getElementById('png-kind').textContent) && /task table/.test(d.getElementById('print-kind').textContent),
+        'on the Table tab, PNG and Print describe the task table');
+      const tpng = new Promise(resolve => {
+        const oc = w.HTMLAnchorElement.prototype.click;
+        w.HTMLAnchorElement.prototype.click = function () { w.HTMLAnchorElement.prototype.click = oc; resolve(this.download); };
+      });
+      d.getElementById('btn-png').click();
+      const tname = await Promise.race([tpng, sleep(5000).then(() => null)]);
+      check(/-table\.png$/.test(tname || ''), `Table tab exports the table image (${tname})`);
+      const realPrint = w.print; w.print = () => {};
+      d.getElementById('btn-print').click(); await sleep(30);
+      const pa = d.getElementById('print-area');
+      check(pa.querySelector('table.print-table') && pa.querySelectorAll('tbody tr').length === count() && !pa.querySelector('svg'),
+        `Table tab prints the table (${pa.querySelectorAll('tbody tr').length} rows, no chart)`);
+      d.querySelector('.tabs button[data-view="split"]').click(); await sleep(60);
+      d.getElementById('btn-print').click(); await sleep(30);
+      check(pa.querySelector('svg.gantt-print') && !pa.querySelector('table'), 'Table/Gantt still prints the Gantt chart');
+      w.print = realPrint;
+      w.dispatchEvent(new w.Event('afterprint'));
+
       // ---- PNG export: capture the download instead of saving it ----
       const captured = new Promise(resolve => {
         const origURL = w.URL.createObjectURL, origClick = w.HTMLAnchorElement.prototype.click;
@@ -342,6 +480,64 @@
       d.querySelector('.tabs button[data-view="split"]').click();
       await sleep(60);
 
+      // ---- Column resizing ----
+      d.querySelector('.tabs button[data-view="split"]').click(); await sleep(60);
+      const th = f => d.querySelector(`#thead th[data-col="${f}"]`);
+      const thW = f => Math.round(th(f).getBoundingClientRect().width);
+      const rs = f => th(f).querySelector('.col-rs');
+      const dragBy = async (el, dx) => {
+        const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+        const ev = (type, cx) => el.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, button: 0, clientX: cx, clientY: y }));
+        ev('pointerdown', x); ev('pointermove', x + dx / 2); ev('pointermove', x + dx); ev('pointerup', x + dx);
+        await sleep(60);
+      };
+      check(thW('name') === 260 && thW('start') === 150, `default widths (name ${thW('name')}, start ${thW('start')})`);
+      const order0 = names().join('|');
+      await dragBy(rs('name'), 100);
+      check(Math.abs(thW('name') - 360) <= 1, `dragging the Task name edge widens it by 100 px (${thW('name')})`);
+      check(names().join('|') === order0 && count() === order0.split('|').length, 'resizing does not reorder or add rows');
+      await dragBy(rs('start'), -300);
+      check(thW('start') === 124, `a column stops at its minimum width (start ${thW('start')}, min 124)`);
+      rs('start').dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true }));
+      await sleep(30);
+      check(thW('start') === 150, `double-clicking the edge resets the column (${thW('start')})`);
+      await dragBy(rs('num'), 20);
+      check(names().join('|') === order0, 'dragging the # column edge resizes instead of moving a row');
+      rs('num').dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true })); await sleep(30);
+      // the row-number grip still reorders rows
+      await drag(row(6).querySelector('.c-num'), row(8).getBoundingClientRect().bottom - 2);
+      check(cell(8, 'name').value === 'Mechanical CAD', 'the # grip still reorders rows after resizing');
+      await click('undo');
+      // Gantt task-name divider
+      const gLabW = () => Math.round(d.querySelector('#gantt-pane .g-labels svg').width.baseVal.value);
+      check(gLabW() === 280, `Gantt name column defaults to 280 (${gLabW()})`);
+      await dragBy(d.getElementById('gantt-rs'), 80);
+      check(gLabW() === 360 && parseInt(d.getElementById('gantt-rs').style.left) === 360, `dragging the Gantt divider widens the name column (${gLabW()})`);
+      await dragBy(d.getElementById('gantt-rs'), -1000);
+      check(gLabW() === 120, `the Gantt name column stops at 120 px (${gLabW()})`);
+      d.getElementById('gantt-rs').dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true })); await sleep(30);
+      check(gLabW() === 280, 'double-clicking the divider resets it');
+      await dragBy(d.getElementById('gantt-rs'), 40);
+      // Exports follow the widths
+      const gsvg = d.getElementById('btn-print'); w.print = () => {};
+      gsvg.click(); await sleep(30);
+      const pr = d.querySelector('#print-area svg.gantt-print');
+      check(pr && /^0 0 /.test(pr.getAttribute('viewBox')) && d.querySelector('#print-area svg.gantt-print rect.g-label-bg').getAttribute('width') === '320',
+        'printed Gantt uses the resized name column (320 px)');
+      d.querySelector('.tabs button[data-view="table"]').click(); await sleep(60);
+      gsvg.click(); await sleep(30);
+      const cols = [...d.querySelectorAll('#print-area .print-table col')].map(c => parseFloat(c.style.width));
+      check(cols.length === 10 && cols[1] > 30, `printed table gives Task name a larger share after widening (${cols[1].toFixed(1)}%)`);
+      w.dispatchEvent(new w.Event('afterprint'));
+      d.querySelector('.tabs button[data-view="split"]').click(); await sleep(60);
+
+      // Help shows the version and links to the changelog
+      const ver = d.getElementById('app-version')?.textContent;
+      const clink = [...d.querySelectorAll('#dlg-help a')].find(a => /CHANGELOG\.md$/.test(a.href));
+      check(/^\d+\.\d+\.\d+$/.test(ver || '') && clink, `Help shows version ${ver} and links to the changelog`);
+      const clog = await (await fetch('../CHANGELOG.md')).text();
+      check(clog.includes(`## ${ver} — `), `CHANGELOG.md has an entry for version ${ver}`);
+
       // Persistence: reload the frame, plan is still there with edits
       const name = d.getElementById('plan-name').textContent;
       w.location.reload();
@@ -350,6 +546,9 @@
       const d2 = frame.contentDocument;
       check(d2.getElementById('plan-name').textContent === name && d2.querySelectorAll('#tbody tr[data-id]').length === n0 + 1,
         'plan persists across reload');
+      check(Math.round(d2.querySelector('#thead th[data-col="name"]').getBoundingClientRect().width) === 360
+        && Math.round(d2.querySelector('#gantt-pane .g-labels svg').width.baseVal.value) === 320,
+        'column widths survive a reload (per-browser preference)');
     } catch (e) {
       check(false, `exception: ${e.message}`);
     }

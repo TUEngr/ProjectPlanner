@@ -38,8 +38,9 @@ export function pertLayout(plan, sched, hidden = new Set()) {
       if (a === b || !isNode.has(a.id) || !isNode.has(b.id)) continue;
       const key = `${a.id}>${b.id}:${type}`;
       const crit = p0.critical && s.critical && linkDrives(p0, s, type);
-      if (edges.has(key)) edges.get(key).crit ||= crit;
-      else edges.set(key, { from: a.id, to: b.id, type, crit });
+      const near = !crit && (p0.critical || p0.near) && (s.critical || s.near) && linkDrives(p0, s, type);
+      if (edges.has(key)) { const e = edges.get(key); e.crit ||= crit; e.near ||= near; }
+      else edges.set(key, { from: a.id, to: b.id, type, crit, near });
     }
   }
   const E = [...edges.values()];
@@ -99,7 +100,7 @@ export function pertLayout(plan, sched, hidden = new Set()) {
 }
 
 function nodeSVG(r, t, { x, y }, selectedId) {
-  const cls = ['pt-node', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '',
+  const cls = ['pt-node', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '', !r.summary && r.near ? 'near' : '',
     r.issues.length ? 'conflict' : '', r.id === selectedId ? 'selected' : ''].filter(Boolean).join(' ');
   const title = `${r.summary ? '▸ ' : r.milestone ? '◆ ' : ''}${t.name || '(unnamed)'}`;
   const dur = r.milestone ? 'Milestone' : `${r.duration} day${r.duration === 1 ? '' : 's'}`;
@@ -118,7 +119,7 @@ function nodeSVG(r, t, { x, y }, selectedId) {
     + `<text class="pt-text" x="8" y="42">Start ${shortDate(r.startDay)}</text>`
     + `<text class="pt-text" x="${W - 8}" y="42" text-anchor="end">Finish ${shortDate(r.finishDay)}</text>`
     + `<text class="pt-text" x="8" y="59">${dur}</text>`
-    + `<text class="pt-text${!r.summary && r.critical ? ' crit' : ''}" x="${W - 8}" y="59" text-anchor="end">${float}</text>`
+    + `<text class="pt-text${!r.summary && r.critical ? ' crit' : !r.summary && r.near ? ' nearc' : ''}" x="${W - 8}" y="59" text-anchor="end">${float}</text>`
     + `<text class="pt-text muted" x="8" y="76">${esc(truncate(who, 30))}</text>`
     + `</g>`;
 }
@@ -134,21 +135,22 @@ function edgeSVG(e, xy) {
   const label = e.type === 'FS' ? '' : (() => {
     const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
     return `<rect class="pt-tag-bg" x="${mx - 12}" y="${my - 8}" width="24" height="15" rx="3"/>`
-      + `<text class="pt-tag${e.crit ? ' critical' : ''}" x="${mx}" y="${my + 3.5}" text-anchor="middle">${e.type}</text>`;
+      + `<text class="pt-tag${e.crit ? ' critical' : e.near ? ' near' : ''}" x="${mx}" y="${my + 3.5}" text-anchor="middle">${e.type}</text>`;
   })();
-  return `<path class="pt-link${e.crit ? ' critical' : ''}" d="${d}" marker-end="url(#${e.crit ? 'pt-arrow-crit' : 'pt-arrow'})"/>${label}`;
+  return `<path class="pt-link${e.crit ? ' critical' : e.near ? ' near' : ''}" d="${d}" marker-end="url(#${e.crit ? 'pt-arrow-crit' : e.near ? 'pt-arrow-near' : 'pt-arrow'})"/>${label}`;
 }
 
 const DEFS = `<defs>
   <marker id="pt-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="pt-arrowhead" d="M0,0 L8,4 L0,8 Z"/></marker>
+  <marker id="pt-arrow-near" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="pt-arrowhead near" d="M0,0 L8,4 L0,8 Z"/></marker>
   <marker id="pt-arrow-crit" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="pt-arrowhead critical" d="M0,0 L8,4 L0,8 Z"/></marker>
 </defs>`;
 
 function chart(plan, sched, hidden, selectedId) {
   const L = pertLayout(plan, sched, hidden);
   const taskOf = new Map(plan.tasks.map(t => [t.id, t]));
-  // Critical edges last so they sit on top
-  const edges = [...L.edges].sort((a, b) => a.crit - b.crit).map(e => edgeSVG(e, L.xy)).join('');
+  // Critical edges last so they sit on top (then near-critical)
+  const edges = [...L.edges].sort((a, b) => (a.crit * 2 + a.near) - (b.crit * 2 + b.near)).map(e => edgeSVG(e, L.xy)).join('');
   const nodes = L.nodes.map(r => nodeSVG(r, taskOf.get(r.id), L.xy.get(r.id), selectedId)).join('');
   const empty = L.nodes.length ? '' : `<text class="pt-text muted" x="${PAD}" y="${PAD + 14}">No tasks to show.</text>`;
   return { width: L.width, height: L.height, inner: `${DEFS}${edges}${nodes}${empty}` };

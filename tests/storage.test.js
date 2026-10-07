@@ -2,6 +2,8 @@
 import { normalize, newTaskId, TASK_ID_RE, blankTask } from '../js/storage.js';
 import { samplePlan } from '../js/sample.js';
 import { schedule } from '../js/schedule.js';
+import { csvToPlan, csvDate } from '../js/csv.js';
+import { parsePredList } from '../js/table.js';
 import { rankBetween, assignRanks, planToFiles, planFromFiles, PLAN_FILE, TASK_DIR } from '../js/planfiles.js';
 
 const results = [];
@@ -215,6 +217,31 @@ test('scheduler works with string ids and with legacy integer ids', () => {
     { id: 2, name: 'b', level: 0, duration: 2, preds: [1], manualStart: null, pct: 0 },
   ] });
   eq(legacy.byId.get(2).es, 2);
+});
+
+test('files: the near-critical setting round-trips; 0 (off) is not replaced by the default; old plans get the default', () => {
+  for (const [input, expected] of [[5, 5], [0, 0], [undefined, 2], [null, 2], [999, 999], [-3, 0]]) {
+    const plan = samplePlan();
+    if (input === undefined) delete plan.nearCritical; else plan.nearCritical = input;
+    const files = planToFiles(plan);
+    eq(JSON.parse(files[PLAN_FILE]).nearCritical, expected, `file for ${input}`);
+    eq(planFromFiles(files).nearCritical, expected, `plan for ${input}`);
+  }
+});
+
+test('files: a CSV import becomes valid repo files with its links intact', () => {
+  const csv = 'WBS,Name,Days,Depends on,Start\n1,Phase,,,\n1.1,Dig,3,,10/5/2026\n1.2,Pour,2,2 ,\n2,Done,0,3SS,\n';
+  const { plan: raw } = csvToPlan(csv, { name: 'Imported', parsePreds: parsePredList, isoDate: csvDate });
+  const plan = normalize(raw);
+  const files = planToFiles(plan);
+  eq(Object.keys(files).length, 1 + plan.tasks.length);
+  ok(plan.tasks.every(t => TASK_ID_RE.test(t.id)), 'task ids are file-safe');
+  const back = planFromFiles(files);
+  eq(back.tasks.map(t => [t.name, t.level, t.duration]), plan.tasks.map(t => [t.name, t.level, t.duration]));
+  eq(back.tasks.map(t => t.preds), plan.tasks.map(t => t.preds));
+  eq(back.tasks[2].preds, [{ id: back.tasks[1].id, type: 'FS' }], 'Pour follows Dig');
+  eq(back.tasks[3].preds, [{ id: back.tasks[2].id, type: 'SS' }], 'Done starts with Pour');
+  eq(Object.keys(planToFiles(back)).sort(), Object.keys(files).sort());
 });
 
 export default results;

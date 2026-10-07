@@ -14,6 +14,9 @@
   --crit: #dc2626;
   --crit-dark: #8f1515;
   --crit-soft: #fde4e4;
+  --near: #f59e0b;        /* near-critical bars */
+  --near-text: #c2410c;   /* near-critical text */
+  --near-soft: #ffedd5;
   --summary: #1c2230;
   --link: #8a94a6;
   --nonwork: #eceef2;
@@ -41,6 +44,9 @@
     --crit: #f05252;
     --crit-dark: #ffd0d0;
     --crit-soft: #4a1d1f;
+    --near: #f5a524;
+    --near-text: #fb923c;
+    --near-soft: #45290f;
     --summary: #e6e9ef;
     --link: #7c869a;
     --nonwork: #1f2430;
@@ -127,7 +133,16 @@ main.view-split #table-pane { flex: 1 1 45%; border-bottom: 3px solid var(--bord
 main.view-split #gantt-wrap { flex: 1 1 55%; }
 
 /* ---- task table ---- */
-table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
+table.tasks { border-collapse: collapse; width: 100%; table-layout: fixed; } /* widths set per column by applyColumnWidths */
+.tasks td, .tasks th { overflow: hidden; text-overflow: ellipsis; }
+/* Column resize handles: a strip on the right edge of each heading */
+.col-rs { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 2; touch-action: none; }
+.col-rs::after { content: ''; position: absolute; top: 20%; bottom: 20%; left: 3px; width: 1px; background: var(--border); }
+.col-rs:hover::after, body.resizing .col-rs.active::after { background: var(--accent); width: 2px; left: 2px; }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+/* Gantt task-name column divider (positioned by app.js) */
+.gantt-rs { position: absolute; top: 0; bottom: 0; width: 7px; margin-left: -3px; z-index: 4; cursor: col-resize; touch-action: none; }
+.gantt-rs:hover, body.resizing .gantt-rs.active { background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px); }
 .tasks th {
   position: sticky; top: 0; z-index: 1; background: var(--bg-head);
   text-align: left; font-weight: 600; font-size: 12px; color: var(--fg-muted);
@@ -145,14 +160,13 @@ table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
 .tasks tr.summary input[data-f="name"] { font-weight: 700; }
 .tasks tr.summary input[readonly] { color: var(--fg); }
 .tasks tr.critical input[data-f="name"] { color: var(--crit); }
-.c-num { width: 44px; text-align: right; color: var(--fg-muted); padding-right: 6px !important; font-variant-numeric: tabular-nums; }
-.c-flag { width: 22px; text-align: center; }
+.tasks tr.near input[data-f="name"] { color: var(--near-text); }
+.c-num { text-align: right; color: var(--fg-muted); padding-right: 6px !important; font-variant-numeric: tabular-nums; }
+.c-flag { text-align: center; }
 .flag { color: var(--warn); cursor: help; }
 .flag.ms { color: var(--fg-muted); }
-.c-name { min-width: 220px; }
-.c-dur, .c-pct, .c-float { width: 70px; }
 .c-dur input, .c-pct input { text-align: right; }
-.c-date { width: 150px; white-space: nowrap; }
+.c-date { white-space: nowrap; }
 .c-date input { width: calc(100% - 4px); }
 .c-date.pinned { position: relative; }
 .c-date.pinned input { background: var(--pinned); padding-right: 24px; }
@@ -160,11 +174,9 @@ table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
   position: absolute; right: 30px; top: 4px; border: none; background: none;
   padding: 0 2px; font-size: 12px; line-height: 20px;
 }
-.c-preds { width: 110px; }
-.c-who { width: 120px; }
-.c-notes { min-width: 160px; }
 .c-float { text-align: right; padding-right: 10px !important; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 .tasks tr.critical .c-float { color: var(--crit); font-weight: 600; }
+.tasks tr.near .c-float { color: var(--near-text); font-weight: 600; }
 .tasks td.empty { padding: 16px; color: var(--fg-muted); }
 
 /* ---- Gantt ---- */
@@ -187,6 +199,7 @@ table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
 .g-label { fill: var(--fg); font-size: 12.5px; font-family: var(--font); }
 .g-label.summary { font-weight: 700; }
 .g-label.critical { fill: var(--crit); }
+.g-label.near { fill: var(--near-text); }
 .g-warn { fill: var(--warn); }
 .g-nonwork { fill: var(--nonwork); }
 .g-grid { stroke: var(--grid); stroke-width: 1; }
@@ -194,16 +207,21 @@ table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
 .g-task { cursor: pointer; }
 .g-bar { fill: var(--bar); }
 .g-bar.critical { fill: var(--crit); }
+.g-bar.near { fill: var(--near); }
 .g-bar.conflict, .g-milestone.conflict { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 3 2; }
 .g-progress { fill: var(--bar-dark); }
 .g-progress.critical { fill: var(--crit-dark); }
+.g-progress.near { fill: var(--near-text); }
 .g-summary { fill: var(--summary); }
 .g-milestone { fill: var(--summary); }
 .g-milestone.critical { fill: var(--crit); }
+.g-milestone.near { fill: var(--near); }
 .g-link { fill: none; stroke: var(--link); stroke-width: 1.3; }
 .g-link.critical { stroke: var(--crit); stroke-width: 1.6; }
+.g-link.near { stroke: var(--near); stroke-width: 1.5; }
 .g-arrowhead { fill: var(--link); }
 .g-arrowhead.critical { fill: var(--crit); }
+.g-arrowhead.near { fill: var(--near); }
 .g-bar-text { fill: var(--fg-muted); font-size: 11px; font-family: var(--font); }
 
 /* ---- status bar ---- */
@@ -215,6 +233,7 @@ table.tasks { border-collapse: collapse; width: 100%; min-width: 1100px; }
 .statusbar b { color: var(--fg); }
 .statusbar .save-state { margin-left: auto; }
 .crit-text { color: var(--crit); }
+.near-text { color: var(--near-text); }
 .warn-text { color: var(--warn); }
 
 /* ---- dialogs & toast ---- */
@@ -226,6 +245,8 @@ fieldset.weekend { border: 1px solid var(--border); border-radius: 6px; margin: 
 fieldset.weekend legend { font-weight: 600; padding: 0 4px; }
 dialog label.check { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-weight: 400; }
 dialog label.check input { display: inline-block; width: auto; margin: 0; }
+dialog label.check { flex-wrap: wrap; }
+dialog label.check input.num-in { width: 5em; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 dialog::backdrop { background: rgb(0 0 0 / .35); }
 dialog h2 { margin: 0 0 12px; font-size: 18px; }
 dialog label { display: block; margin: 10px 0; font-weight: 600; }
@@ -263,33 +284,105 @@ dialog label input, dialog label textarea, #share-url {
 }
 .g-warn, .g-pin { cursor: help; }
 
+/* ---- Export menu (fixed to the viewport so scrolling bars can't clip it) ---- */
+.menu {
+  position: fixed; z-index: 40; min-width: 260px; max-width: calc(100vw - 16px); padding: 4px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / .18); display: flex; flex-direction: column;
+}
+.menu[hidden] { display: none; }
+.menu button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left;
+  border: none; border-radius: 6px; padding: 7px 10px; background: none; white-space: normal;
+}
+.menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--accent-soft); outline: none; }
+.menu button b { font-weight: 600; }
+.menu button span { font-size: 12px; color: var(--fg-muted); }
+
+/* Task table for PNG export (SVG) */
+.tx-head-bg { fill: var(--bg-head); }
+.tx-head { fill: var(--fg-muted); font-size: 12px; font-weight: 600; font-family: var(--font); }
+.tx-cell { fill: var(--fg); font-size: 12.5px; font-family: var(--font); }
+.tx-cell.summary { font-weight: 700; }
+.tx-cell.critical { fill: var(--crit); }
+.tx-cell.near { fill: var(--near-text); }
+.tx-cell.muted { fill: var(--fg-muted); }
+.tx-odd { fill: var(--bg-alt); }
+.tx-rule { stroke: var(--grid); stroke-width: 1; }
+.tx-rule.strong { stroke: var(--border); }
+
+/* Task table for printing (HTML, so it flows across pages) */
+.print-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: auto; }
+/* Fixed-format columns shrink to their content and never wrap (see tablePrintHTML) */
+.print-table .tp-row, .print-table .tp-duration, .print-table .tp-start, .print-table .tp-finish,
+.print-table .tp-pct, .print-table .tp-float { white-space: nowrap; }
+.print-table td.tp-name, .print-table td.tp-preds, .print-table td.tp-assignee, .print-table td.tp-notes { overflow-wrap: anywhere; }
+.print-table thead { display: table-header-group; } /* repeat the header on each page */
+.print-table tr { break-inside: avoid; }
+.print-table th { text-align: left; font-weight: 600; color: #444; background: #eef0f4; border-bottom: 1px solid #999; padding: 3px 4px; }
+.print-table td { border-bottom: 1px solid #ddd; padding: 2px 4px; vertical-align: top; }
+.print-table .num { text-align: right; }
+.print-table tr.summary td { font-weight: 700; }
+.print-table tr.critical td { color: #c00; }
+.print-table tr.near td { color: #c2410c; }
+.print-table .tp-row, .print-table .tp-float { color: #666; }
+
 #print-area { display: none; }
 
-@media (max-width: 700px) {
-  .topbar, .toolbar, .statusbar, .banner { padding-left: 16px; padding-right: 16px; }
+/* ---- Compact layout: phones in portrait (narrow) or landscape (short) ----
+   One slim app bar (menu button + plan name); everything else is in the
+   drawer. Keep the breakpoint in sync with COMPACT in app.js. */
+.compact-only, #drawer, #scrim { display: none; }
+body:not(.readonly) .readonly-only { display: none !important; }
+
+@media (max-width: 700px), (max-height: 500px) {
+  .col-rs, .gantt-rs { display: none; } /* no resizing on phones */
+  html, body { height: 100%; }
+  body { height: 100dvh; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  .topbar { flex-wrap: nowrap; gap: 6px; padding: 4px 8px; padding-top: max(4px, env(safe-area-inset-top)); }
+  .brand, .actions, .toolbar, .statusbar, #readonly-banner { display: none !important; }
+  .compact-only { display: inline-flex; }
+  .plan-name { flex: 1 1 0; min-width: 0; max-width: none; text-align: left; padding-left: 2px; white-space: nowrap; }
+  .hamburger { flex: none; width: 40px; height: 36px; justify-content: center; align-items: center; font-size: 20px; border: none; background: none; }
+  .ro-chip { flex: none; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--accent-soft); color: var(--fg); }
   main.view-split #table-pane, main.view-split-pert #table-pane { flex-basis: 50%; }
 
-  /* Phones: one line for brand + plan name, then each button group is a
-     single row that scrolls sideways instead of wrapping. The fade at the
-     right edge hints that there is more; end padding lets the last button
-     scroll clear of it. */
-  .topbar { flex-wrap: wrap; row-gap: 6px; padding-top: 6px; padding-bottom: 6px; }
-  .brand { flex: none; }
-  .plan-name { flex: 1 1 0; min-width: 0; max-width: none; text-align: left; padding-left: 4px; }
-  .actions, .toolbar, .statusbar {
-    flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
-    scrollbar-width: none; -webkit-overflow-scrolling: touch;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  #scrim { display: block; position: fixed; inset: 0; z-index: 44; background: rgb(0 0 0 / .35); opacity: 0; transition: opacity .2s; }
+  #scrim.open { opacity: 1; }
+  #drawer {
+    display: block; position: fixed; top: 0; bottom: 0; left: 0; z-index: 45;
+    width: min(320px, 86vw); overflow-y: auto; overscroll-behavior: contain;
+    background: var(--bg); box-shadow: 2px 0 16px rgb(0 0 0 / .25);
+    padding: 0 0 max(12px, env(safe-area-inset-bottom)) env(safe-area-inset-left);
+    transform: translateX(-105%); transition: transform .2s ease;
   }
-  .actions::-webkit-scrollbar, .toolbar::-webkit-scrollbar, .statusbar::-webkit-scrollbar { display: none; }
-  .actions { flex: 1 0 100%; margin-left: 0; padding-right: 28px; }
-  .toolbar { padding-right: 44px; gap: 8px; }
-  .toolbar > *, .actions > *, .statusbar > * { flex: none; }
-  .row-tools { flex-wrap: nowrap; }
-  .statusbar { gap: 14px; padding-right: 44px; white-space: nowrap; }
-  .statusbar .save-state { margin-left: 0; }
+  #drawer.open { transform: none; }
+  #scrim[hidden], #drawer[hidden] { display: none; }
 }
+@media (prefers-reduced-motion: reduce) { #drawer, #scrim { transition: none; } }
+
+/* Drawer contents */
+.dr-head { padding: 10px 14px 12px; background: var(--bg-head); border-bottom: 1px solid var(--border); padding-top: max(10px, env(safe-area-inset-top)); }
+.dr-title { display: flex; align-items: center; justify-content: space-between; font-weight: 700; color: var(--fg-muted); font-size: 13px; }
+.dr-close { border: none; background: none; font-size: 16px; padding: 4px 8px; }
+.dr-plan { font-weight: 700; font-size: 16px; margin: 4px 0 6px; overflow-wrap: anywhere; }
+.dr-status { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12.5px; color: var(--fg-muted); }
+.dr-status b { color: var(--fg); }
+.dr-status .save-state { flex-basis: 100%; }
+.dr-ro p { margin: 10px 0 6px; font-size: 13px; }
+.dr-ro button { margin: 0 6px 6px 0; }
+#drawer section { padding: 8px 8px; border-bottom: 1px solid var(--grid); }
+#drawer h3 { margin: 2px 6px 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); }
+#drawer h3 span { text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--fg); }
+.dr-list { display: flex; flex-direction: column; }
+.dr-list > button, .dr-list > a {
+  display: block; width: 100%; text-align: left; border: none; background: none; border-radius: 6px;
+  padding: 9px 10px; min-height: 40px; color: var(--fg); text-decoration: none; font: inherit;
+}
+.dr-list > button:hover:not(:disabled), .dr-list > a:hover { background: var(--accent-soft); }
+.dr-list > button[aria-checked="true"] { background: var(--accent); color: #fff; font-weight: 600; }
+.dr-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 0 2px; }
+.dr-grid button { min-height: 38px; padding: 4px 6px; }
 
 /* ---- print: Gantt chart only, scaled to page width ---- */
 @media print {
@@ -336,6 +429,10 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .pt-node.critical .pt-box { stroke: var(--crit); stroke-width: 2; }
 .pt-node.critical .pt-head { fill: var(--crit-soft); }
 .pt-node.critical .pt-rule { stroke: var(--crit); }
+.pt-node.near .pt-box { stroke: var(--near); stroke-width: 2; }
+.pt-node.near .pt-head { fill: var(--near-soft); }
+.pt-node.near .pt-rule { stroke: var(--near); }
+.pt-node.near .pt-title { fill: var(--near-text); }
 .pt-node.summary .pt-box { stroke-dasharray: 5 3; stroke-width: 1.5; stroke: var(--summary); }
 .pt-node.conflict .pt-box { stroke: var(--warn); stroke-dasharray: 3 2; }
 .pt-node.selected .pt-box { fill: var(--select); }
@@ -345,14 +442,18 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .pt-text { fill: var(--fg); font-size: 11.5px; font-family: var(--font); }
 .pt-text.muted { fill: var(--fg-muted); }
 .pt-text.crit { fill: var(--crit); font-weight: 600; }
+.pt-text.nearc { fill: var(--near-text); font-weight: 600; }
 .pt-warn { fill: var(--warn); font-size: 13px; font-family: var(--font); }
 .pt-link { fill: none; stroke: var(--link); stroke-width: 1.4; }
 .pt-link.critical { stroke: var(--crit); stroke-width: 2; }
+.pt-link.near { stroke: var(--near); stroke-width: 1.8; }
 .pt-arrowhead { fill: var(--link); }
 .pt-arrowhead.critical { fill: var(--crit); }
+.pt-arrowhead.near { fill: var(--near); }
 .pt-tag-bg { fill: var(--bg); stroke: var(--border); }
 .pt-tag { fill: var(--fg-muted); font-size: 10px; font-weight: 700; font-family: var(--font); }
 .pt-tag.critical { fill: var(--crit); }
+.pt-tag.near { fill: var(--near-text); }
 
 /* ---- repo mode (plan stored in a git clone) ---- */
 body.repo-mode #btn-plans, body.repo-mode #btn-share, body.viewer #btn-plans, body.viewer #btn-share { display: none; }
@@ -367,5 +468,14 @@ fieldset.clash { border: 0; padding: 0; margin: 10px 0 0; }
 fieldset.clash legend { font-weight: 600; font-size: 13px; padding: 0; margin-bottom: 2px; }
 fieldset.clash label.check { align-items: flex-start; font-weight: 400; margin: 3px 0; }
 fieldset.clash label.check b { font-weight: 600; }
+.viewer-only { display: none; }
+.dr-viewer p { margin: 10px 0 6px; font-size: 13px; }
+.dr-viewer button { margin: 0 6px 6px 0; }
+body.viewer .viewer-only { display: block; }
+body.viewer .readonly-only { display: none !important; }
+body.repo-mode #drawer [data-proxy="#btn-plans"], body.repo-mode #drawer [data-proxy="#btn-share"],
+body.viewer #drawer [data-proxy="#btn-plans"], body.viewer #drawer [data-proxy="#btn-share"] { display: none !important; }
+#drawer [hidden] { display: none !important; }
+@media (max-width: 700px), (max-height: 500px) { .repo-link { display: none !important; } } /* the drawer has its own link */
 .repo-link { font-size: 13px; color: var(--fg-muted); text-decoration: none; margin-left: -4px; }
 .repo-link:hover { text-decoration: underline; }

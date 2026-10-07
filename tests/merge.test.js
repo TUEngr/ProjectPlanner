@@ -121,6 +121,16 @@ test('merge: the plan settings merge too, holidays by date', () => {
   eq(b.conflicts.map(c => [c.id, c.label]), [['holidays:2026-11-26', 'Holiday']]);
 });
 
+test('merge: the near-critical threshold merges like any other plan setting', () => {
+  const base = { id: 'p', name: 'Plan', start: '2026-10-05', satOff: true, sunOff: true, showGantt: true, showPert: true, nearCritical: 2, holidays: [] };
+  const pt = obj => serializeFile(PLAN_FILE, obj);
+  const only = analyze(PLAN_FILE, { base: pt(base), ours: pt({ ...base, nearCritical: 5 }), theirs: pt(base) });
+  eq([only.conflicts.length, JSON.parse(finish(only)).nearCritical], [0, 5]);
+  const both = analyze(PLAN_FILE, { base: pt(base), ours: pt({ ...base, nearCritical: 5 }), theirs: pt({ ...base, nearCritical: 0 }) });
+  eq(both.conflicts.map(c => [c.id, c.label]), [['nearCritical', 'Near-critical threshold (days)']]);
+  eq(JSON.parse(finish(both, { nearCritical: 'theirs' })).nearCritical, 0);
+});
+
 test('merge: two people creating plan.json in an empty project agree on the plan id and ask only about real differences', () => {
   const mk = (id, name) => serializeFile(PLAN_FILE, { id, name, start: '2026-10-05', satOff: true, sunOff: true, showGantt: true, showPert: true, holidays: [] });
   const a = analyze(PLAN_FILE, { base: null, ours: mk('bbbb', 'From B'), theirs: mk('aaaa', 'From A') });

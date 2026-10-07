@@ -4,6 +4,7 @@ import { schedule, hiddenIds } from '../js/schedule.js';
 import { ganttPrintSVG } from '../js/gantt.js';
 import { samplePlan } from '../js/sample.js';
 import { pertLayout, pertPrintSVG } from '../js/pert.js';
+import { tablePrintHTML, tableStandaloneSVG } from '../js/tableexport.js';
 
 const results = [];
 const plan = samplePlan();
@@ -16,6 +17,14 @@ for (const zoom of ['day', 'week', 'month']) {
 const crit = sched.rows.filter(r => !r.summary && r.critical).map(r => r.row);
 results.push([crit.join() === '2,3,4,7,8,9,11,14,15,16', `sample critical path rows: ${crit.join(', ')}`]);
 results.push([(ganttPrintSVG(plan, sched, 'day').match(/class="g-link/g) || []).length === 15, 'sample has 15 dependency arrows']);
+{
+  // Sample floats are 4, 5 and 9: none near-critical at the default 2; two at 5
+  results.push([sched.rows.every(r => !r.near), 'sample has no near-critical tasks at the default threshold (2)']);
+  const p5 = { ...plan, nearCritical: 5 }, s5 = schedule(p5);
+  const near = s5.rows.filter(r => r.near).map(r => r.row).join();
+  const svg = ganttPrintSVG(p5, s5, 'day');
+  results.push([near === '6,12' && (svg.match(/g-bar near/g) || []).length === 2, `threshold 5: near-critical rows ${near}; drawn orange`]);
+}
 
 // PERT: 13 task nodes; column = dependency depth
 {
@@ -27,6 +36,22 @@ results.push([(ganttPrintSVG(plan, sched, 'day').match(/class="g-link/g) || []).
   results.push([L.edges.filter(e => e.crit).length === 9, `PERT critical edges follow the critical path (${L.edges.filter(e => e.crit).length}, expect 9)`]);
   const svg = pertPrintSVG(plan, sched);
   results.push([!/NaN|undefined|Infinity/.test(svg), 'PERT render has valid coordinates']);
+}
+
+// Table export: one row per task, critical rows marked, valid image
+{
+  const html = tablePrintHTML(plan, sched);
+  const rows = (html.match(/<tr/g) || []).length - 1;
+  const crit = (html.match(/<tr class="critical"/g) || []).length;
+  results.push([rows === 16 && crit === 10, `table print has 16 rows, 10 critical (${rows}, ${crit})`]);
+  const { svg, width, height } = tableStandaloneSVG(plan, sched, '');
+  const fits = (html.match(/class="tp-fit"/g) || []).length;
+  const pct = w => Number(/<col class="tp-text" style="width:([\d.]+)%">/.exec(tablePrintHTML(plan, sched, new Set(), w))[1]);
+  results.push([fits === 6 && pct({ name: 600 }) > pct({}) + 10,
+    `print: 6 number/date columns fit their content; widening Task name on screen widens it on paper (${pct({}).toFixed(1)}% → ${pct({ name: 600 }).toFixed(1)}%)`]);
+  const wider = tableStandaloneSVG(plan, sched, '', new Set(), { name: 2, notes: 0.5 });
+  results.push([wider.width === width + 290 - 115, `table image follows column scale (${width} → ${wider.width}, expect +290 name −115 notes)`]);
+  results.push([!/NaN|undefined|Infinity/.test(svg) && width > 1000 && !svg.includes("Durati…") && height === 26 + 16 * 22 + 1, `table image ${width}x${height} with valid coordinates`]);
 }
 
 // Collapse "Detailed design" (row 5, children 6-9)
@@ -44,5 +69,7 @@ results.push([(csvg.match(/class="g-link critical/g) || []).length === 7, `merge
   const L = pertLayout(plan, sched, hidden);
   const dd = sched.rows[4].id;
   results.push([L.nodes.length === 10 && L.nodes.some(r => r.id === dd), `collapsed group is one PERT node (${L.nodes.length} nodes, expect 10)`]);
+  const rows = (tablePrintHTML(plan, sched, hidden).match(/<tr/g) || []).length - 1;
+  results.push([rows === 12, `table print leaves out rows inside a collapsed group (${rows} rows, expect 12)`]);
 }
 export default results;

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Project Planner</title>
   <meta name="description" content="Plan projects with tasks, dependencies, and a Gantt chart with critical path. Plans are stored in your browser.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='2' width='8' height='3' fill='%232563eb'/%3E%3Crect x='5' y='7' width='9' height='3' fill='%23dc2626'/%3E%3Crect x='3' y='12' width='6' height='3' fill='%232563eb'/%3E%3C/svg%3E">
@@ -10,21 +10,20 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="btn-drawer" class="hamburger compact-only" aria-label="Menu" aria-controls="drawer" aria-expanded="false">☰</button>
     <div class="brand">Project Planner</div>
     <a id="repo-link" class="repo-link" hidden target="_blank" rel="noopener" title="Open this project's repository on GitHub"></a>
     <button id="plan-name" class="plan-name" title="Plan settings">Untitled</button>
+    <span class="ro-chip compact-only readonly-only">Read-only</span>
     <nav class="actions">
       <button id="btn-sync" class="primary" hidden title="Save, commit your changes, pull your teammates' changes and push to GitHub">Sync</button>
       <button id="btn-plans" title="Open, create, or delete plans">Plans</button>
       <button id="btn-settings" class="edit-only" title="Project start date and holidays">Settings</button>
-      <button id="btn-export" title="Download this plan as a JSON file">Save file</button>
-      <button id="btn-import" class="edit-only" title="Load a plan from a JSON file">Open file</button>
-      <button id="btn-share" title="Create a read-only link to this plan">Share link</button>
-      <button id="btn-png" title="Download the chart (Gantt, or PERT on the PERT tab) as a PNG image, for reports and slides" data-title="Download the chart (Gantt, or PERT on the PERT tab) as a PNG image, for reports and slides">Export PNG</button>
-      <button id="btn-print" title="Print or save the chart (Gantt, or PERT on the PERT tab) as PDF" data-title="Print or save the chart (Gantt, or PERT on the PERT tab) as PDF">Print</button>
+      <button id="btn-open-menu" class="edit-only" aria-haspopup="menu" aria-expanded="false" aria-controls="open-menu" title="Load a plan from a file">Open ▾</button>
+      <button id="btn-export-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="export-menu" title="Share or download this plan">Export ▾</button>
       <button id="btn-help" title="How to use Project Planner">Help</button>
     </nav>
-    <input id="file-input" type="file" accept=".json,application/json" hidden>
+    <input id="file-input" type="file" hidden>
   </header>
 
   <div id="readonly-banner" class="banner" hidden>
@@ -69,6 +68,7 @@
       </table>
     </section>
     <div id="gantt-wrap">
+      <div id="gantt-rs" class="gantt-rs" data-tip="Drag to resize the task-name column · double-click to reset" aria-hidden="true"></div>
       <label class="zoom">Zoom
         <select id="zoom">
           <option value="day">Days</option>
@@ -87,9 +87,94 @@
   <div id="toast" role="status" aria-live="polite"></div>
   <div id="tip" role="tooltip" hidden></div>
 
+  <!-- Compact layout (phones): everything above the chart lives in this drawer.
+       Most items forward a click to the matching desktop control (data-proxy),
+       so both layouts share one set of handlers. -->
+  <div id="scrim" hidden></div>
+  <aside id="drawer" aria-label="Menu" hidden>
+    <div class="dr-head">
+      <div class="dr-title"><span>Project Planner</span><button class="dr-close" aria-label="Close menu">✕</button></div>
+      <div id="dr-plan" class="dr-plan"></div>
+      <div id="dr-status" class="dr-status"></div>
+      <div class="viewer-only dr-viewer">
+        <p>You are viewing a read-only copy of the project plan.</p>
+        <button id="dr-viewer-edit" data-proxy="#btn-viewer-edit" class="primary" hidden>Open in Codespaces to edit</button>
+      </div>
+      <div class="readonly-only dr-ro">
+        <p>You are viewing a read-only shared copy.</p>
+        <button data-proxy="#btn-save-copy" class="primary">Save a copy to my plans</button>
+        <button data-proxy="#btn-close-shared">Close shared plan</button>
+      </div>
+    </div>
+    <section class="edit-only">
+      <h3>Edit <span id="dr-sel"></span></h3>
+      <div class="dr-grid">
+        <button data-cmd="add" data-close>+ Task</button>
+        <button data-cmd="insert" data-close>Insert</button>
+        <button data-cmd="delete">Delete</button>
+        <button data-cmd="outdent">⇤ Outdent</button>
+        <button data-cmd="indent">Indent ⇥</button>
+        <span></span>
+        <button data-cmd="up">↑ Up</button>
+        <button data-cmd="down">↓ Down</button>
+        <span></span>
+        <button data-cmd="undo">↶ Undo</button>
+        <button data-cmd="redo">↷ Redo</button>
+      </div>
+    </section>
+    <section>
+      <h3>View</h3>
+      <div id="dr-views" class="dr-list" role="radiogroup" aria-label="View">
+        <button role="radio" data-goview="table">Table</button>
+        <button role="radio" data-goview="gantt">Gantt</button>
+        <button role="radio" data-goview="pert">PERT</button>
+        <button role="radio" data-goview="split">Table/Gantt</button>
+        <button role="radio" data-goview="split-pert">Table/PERT</button>
+      </div>
+    </section>
+    <section class="dr-list">
+      <button id="dr-sync" data-proxy="#btn-sync" class="primary edit-only" hidden>Sync with GitHub…</button>
+      <button data-proxy="#btn-plans">Plans…</button>
+      <button data-proxy="#btn-settings" class="edit-only">Settings…</button>
+    </section>
+    <section class="edit-only">
+      <h3>Open</h3>
+      <div class="dr-list">
+        <button data-proxy="#btn-import">JSON file…</button>
+        <button data-proxy="#btn-import-csv">CSV file…</button>
+      </div>
+    </section>
+    <section>
+      <h3>Export</h3>
+      <div class="dr-list">
+        <button data-proxy="#btn-share">Read-only link…</button>
+        <button data-proxy="#btn-export">JSON file</button>
+        <button data-proxy="#btn-csv">CSV file</button>
+        <button data-proxy="#btn-png">PNG image</button>
+        <button data-proxy="#btn-print">Print…</button>
+      </div>
+    </section>
+    <section class="dr-list">
+      <button data-proxy="#btn-help">Help</button>
+      <a id="dr-repo" href="#" target="_blank" rel="noopener" hidden></a>
+      <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">Bugs &amp; feature requests ↗</a>
+    </section>
+  </aside>
+  <div id="open-menu" class="menu" role="menu" aria-label="Open" hidden>
+    <button role="menuitem" id="btn-import" data-kind="json"><b>JSON file</b><span>A plan saved with Export → JSON file</span></button>
+    <button role="menuitem" id="btn-import-csv" data-kind="csv"><b>CSV file</b><span>A task table from Excel, Google Sheets, or Export → CSV</span></button>
+  </div>
+  <div id="export-menu" class="menu" role="menu" aria-label="Export" hidden>
+    <button role="menuitem" id="btn-share"><b>Read-only link…</b><span>A link anyone can open to view this plan</span></button>
+    <button role="menuitem" id="btn-export"><b>JSON file</b><span>The full plan; reopen it with Open → JSON file</span></button>
+    <button role="menuitem" id="btn-csv"><b>CSV file</b><span>The task table, for Excel or Google Sheets</span></button>
+    <button role="menuitem" id="btn-png" data-title=""><b>PNG image</b><span id="png-kind">The current chart, for reports and slides</span></button>
+    <button role="menuitem" id="btn-print" data-title=""><b>Print…</b><span id="print-kind">The current chart, or save it as a PDF</span></button>
+  </div>
+
   <dialog id="dlg-plans">
     <h2>My plans</h2>
-    <p class="hint">Plans are saved automatically in this browser only. Use <em>Save file</em> to back up a plan or move it to another computer.</p>
+    <p class="hint">Plans are saved automatically in this browser only. Use <em>Export → JSON file</em> to back up a plan or move it to another computer.</p>
     <ul id="plan-list" class="plan-list"></ul>
     <div class="dlg-buttons">
       <button id="btn-new-plan" class="primary">New plan</button>
@@ -118,6 +203,11 @@
         <label class="check"><input type="checkbox" name="showGantt"> <span>Include Gantt (the <em>Gantt</em> and <em>Table/Gantt</em> tabs)</span></label>
         <label class="check"><input type="checkbox" name="showPert"> <span>Include PERT (the <em>PERT</em> and <em>Table/PERT</em> tabs)</span></label>
         <p class="hint">The table is always available. Saved with the plan, so share links show the same tabs.</p>
+      </fieldset>
+      <fieldset class="weekend">
+        <legend>Critical path</legend>
+        <label class="check"><span>Show tasks with float of</span> <input type="number" name="nearCritical" min="0" max="999" step="1" class="num-in"> <span>working days or less as <strong class="near-text">near-critical</strong></span></label>
+        <p class="hint">Near-critical tasks are drawn in orange: they aren't on the critical path yet, but a short slip would put them there. Use 0 to turn this off.</p>
       </fieldset>
       <div class="dlg-buttons">
         <button value="save" class="primary">Save</button>
@@ -180,36 +270,60 @@
     </div>
   </dialog>
 
+  <dialog id="dlg-import-error">
+    <h2>Could not import the CSV file</h2>
+    <p id="import-error-msg"></p>
+    <p>The importer needs a header row naming the columns and one row per task. Only a <strong>Task</strong> (or <strong>Name</strong>) column is required; it also reads Outline level (or WBS), Type, Duration, Predecessors, % complete, Assignee, Notes, and Pinned start. Start, finish, float, and critical are recalculated.</p>
+    <p class="hint">Download the template, fill it in with Excel or Google Sheets, save it as CSV, and use Open → CSV file again.</p>
+    <div class="dlg-buttons">
+      <button id="btn-csv-template" class="primary">Download template CSV</button>
+      <button value="close" class="close">Close</button>
+    </div>
+  </dialog>
+
   <dialog id="dlg-help">
     <h2>Using Project Planner</h2>
     <ul class="help">
       <li><strong>Views</strong>: <em>Table</em>, <em>Gantt</em>, and <em>PERT</em> show one view each. <em>Table/Gantt</em> and <em>Table/PERT</em> show the table above the chart. The selected task is highlighted in every view. A plan can leave out the Gantt or PERT tabs: see <em>Settings</em>.</li>
+      <li><strong>Column widths</strong>: drag the edge of a table column heading to resize it, or drag the line between the Gantt chart's task names and its bars. Double-click an edge to reset that column. Notes takes up any spare width. Widths are remembered in this browser for all plans, and the table and Gantt exports (PNG image and Print) keep the proportions you set. Resizing is not available in the phone layout.</li>
+      <li><strong>On a phone</strong> the toolbars move into a menu: tap <strong>☰</strong> at the top left. It shows the plan's dates and status, the editing tools (acting on the selected task, named at the top of that section), the views, and Plans, Settings, Open, Export, Print, and Help. Tap outside it, press ✕, or swipe it left to close it. In landscape the split views are left out (there isn't room for two panes), and the editing tools leave the menu open so you can repeat Indent or Move up and watch the result.</li>
       <li><strong>Adding tasks</strong>: <em>+ Task</em> adds a row after the selected task (or as the first subtask of a selected summary). <em>Insert</em> adds a row above it. Pressing Enter in the last row's name also adds a task. <em>Delete</em> removes the selected task; its subtasks move up one level and links to it are removed.</li>
       <li><strong>Keyboard</strong>: Enter / Shift+Enter commits a cell and moves down / up the column. Esc cancels the edit. ⌘/Ctrl+Z undoes; ⌘/Ctrl+Shift+Z or Ctrl+Y redoes.</li>
       <li><strong>Durations</strong> are in working days: Monday to Friday, plus Saturday and/or Sunday if they are unchecked in <em>Settings</em>, minus holidays. Type <code>5</code>, <code>5d</code>, or <code>2w</code>. A duration of <code>0</code> makes a milestone ◆.</li>
       <li><strong>Predecessors</strong>: list row numbers, e.g. <code>2, 5SS, 7FF</code>. A bare number is finish-to-start (this task starts after row 2 finishes). <code>SS</code> is start-to-start (starts no earlier than row 5 starts). <code>FF</code> is finish-to-finish (finishes no earlier than row 7 finishes). With several predecessors, the latest constraint wins. Summary tasks can't have predecessors or be one; link their subtasks instead.</li>
       <li><strong>Dates</strong>: start and finish are calculated. Typing a <em>Start</em> date pins the task there 📌; click the pin to release it. Typing a <em>Finish</em> date changes the duration.</li>
       <li><strong>⚠ warnings</strong> mark problems: a pinned date that breaks a link (it starts before an FS predecessor finishes, starts before an SS predecessor starts, or finishes before an FF predecessor finishes), a circular dependency, or a link to a summary task. Hover the ⚠ for details.</li>
-      <li><strong>Summary tasks</strong>: select a task and click <em>Indent</em> to make it a subtask of the row above; <em>Outdent</em> reverses it. Summary rows roll up dates and progress from their subtasks. Double-click a summary row (in the table or the Gantt chart), or click its ▾ / ▸, to collapse or expand it. Each group remembers its own state, so expanding a phase restores its subgroups as you left them. Links to hidden tasks are drawn to the collapsed group's bar, and Print and Export PNG show only what is expanded.</li>
+      <li><strong>Summary tasks</strong>: select a task and click <em>Indent</em> to make it a subtask of the row above; <em>Outdent</em> reverses it. Summary rows roll up dates and progress from their subtasks. Double-click a summary row (in the table or the Gantt chart), or click its ▾ / ▸, to collapse or expand it. Each group remembers its own state, so expanding a phase restores its subgroups as you left them. Links to hidden tasks are drawn to the collapsed group's bar, and Export → PNG image and Export → Print show only what is expanded.</li>
       <li><strong>Reordering</strong>: drag a row in the Gantt chart, or drag the row number (⠿) in the table, up or down. A summary task moves with its subtasks. The ↑ / ↓ buttons move the selected task past its neighbor. Links follow the tasks, so predecessor row numbers update automatically.</li>
-      <li><strong>Critical path</strong> (red) is the chain of tasks with zero float: any slip in them delays the finish. <em>Float</em> is how many working days a task can slip without delaying the project. Links that drive the critical path are drawn in red.</li>
+      <li><strong>Critical path</strong> (red) is the chain of tasks with zero float: any slip in them delays the finish. <em>Float</em> is how many working days a task can slip without delaying the project. Links that drive the critical path are drawn in red. <strong>Near-critical</strong> tasks (orange) have a little float, at most the number of working days set in <em>Settings</em> (2 by default; 0 turns it off): they aren't critical yet, but a short slip would make them so. A <em>pinned</em> date can set the project finish by itself: if the work leading to it finishes early, that work has float and isn't red. Its float shows how much margin there is, and raising the near-critical setting colors it orange.</li>
       <li><strong>Gantt chart</strong>: FS arrows run from the end of one bar to the start of the next; SS arrows join the left ends of the bars and FF arrows the right ends. The dark stripe inside a bar is % done, the dashed green line is today, and shaded columns are non-working days. Click a row to select it; double-click a task to edit it in the table (double-clicking a summary collapses it instead).</li>
       <li><strong>Settings</strong> (or click the plan name): rename the plan, set the project start date, list holidays (one <code>YYYY-MM-DD</code> per line with an optional label), choose whether Saturdays and Sundays are non-working days (both are by default; changing these reschedules every task), and choose whether the plan includes the Gantt and PERT views.</li>
-      <li><strong>Project repositories</strong>: when this page was opened from a project's repository (for example in a GitHub Codespace), the plan is not stored in the browser. It is saved automatically to the repository's <code>data</code> folder, and <em>Plans</em> and <em>Share link</em> are hidden. Press <em>Sync</em> to commit your changes, pull in your teammates' changes and push. If you and a teammate changed the same thing, a dialog asks which version to keep. The status bar shows what is waiting to be committed, pushed or pulled. Which groups you have collapsed stays in your own browser.</li>
+      <li><strong>Project repositories</strong>: when this page was opened from a project's repository (for example in a GitHub Codespace), the plan is not stored in the browser. It is saved automatically to the repository's <code>data</code> folder, and <em>Plans</em> and <em>Export → Read-only link</em> are hidden. Press <em>Sync</em> to commit your changes, pull in your teammates' changes and push. If you and a teammate changed the same thing, a dialog asks which version to keep. The status bar shows what is waiting to be committed, pushed or pulled. <em>Open → JSON file</em> replaces the project's plan, and <em>Open → CSV file</em> replaces its tasks (the name, holidays and settings are kept); you are asked first, git keeps the previous version, and Undo works. Which groups you have collapsed stays in your own browser.</li>
       <li><strong>Plans</strong> (standalone use): keep several plans in this browser. From <em>Plans</em> you can open one, start a new blank or example plan, or delete one. Rename a plan in <em>Settings</em>.</li>
-      <li><strong>Saving</strong> (standalone use): plans save automatically in this browser only. Use <em>Save file</em> / <em>Open file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
-      <li><strong>Share link</strong> (standalone use): copies a link containing a read-only snapshot of the plan. Recipients can view it and click <em>Save a copy to my plans</em> to edit their own copy. Later edits are not included; share again to send an update. The plan is packed into the link itself, so nothing is uploaded, but very large plans make long links.</li>
+      <li><strong>Saving</strong> (standalone use): plans save automatically in this browser only. Use <em>Export → JSON file</em> / <em>Open → JSON file</em> for backups or to move plans between computers. Clearing browser data deletes local plans.</li>
+      <li><strong>Open</strong> menu: <em>JSON file</em> opens a plan saved with Export → JSON file (if that plan is already in this browser you can replace it or keep both). <em>CSV file</em> makes a new plan from a task table, such as one built in Excel or Google Sheets or saved with Export → CSV file. The first row must name the columns; only <strong>Task</strong> (or <strong>Name</strong>) is required. It also reads <em>Outline level</em> (or a <em>WBS</em> number like 1.2), <em>Type</em> (Milestone, Summary), <em>Duration</em>, <em>Predecessors</em> (row numbers such as <code>2, 5SS</code>, matched to a <em>Row</em> column if there is one, otherwise to the line order), <em>% complete</em>, <em>Assignee</em>, <em>Notes</em>, and <em>Pinned start</em>. Start and finish are recalculated; the earliest <em>Start</em> in the file becomes the project start. Dates may be YYYY-MM-DD or M/D/YYYY. Holidays and weekend settings are not in a CSV, so check <em>Settings</em> afterwards. If a file can't be read, you are offered a template CSV to fill in.</li>
+      <li><strong>Export</strong> menu:
+        <ul>
+          <li><em>Read-only link…</em> copies a link containing a snapshot of the plan. Recipients can view it and click <em>Save a copy to my plans</em> to edit their own copy. Later edits are not included; share again to send an update. The plan is packed into the link itself, so nothing is uploaded, but very large plans make long links.</li>
+          <li><em>JSON file</em> downloads the complete plan (tasks, links, settings) for backups or another computer; load it with <em>Open → JSON file</em>.</li>
+          <li><em>CSV file</em> downloads the task table for Excel or Google Sheets: WBS number, row, task, type, duration, start, finish, predecessors, % complete, assignee, notes, float, critical, and pinned start. It includes tasks inside collapsed groups. It can be opened again with <em>Open → CSV file</em>, but only the task table comes back (not holidays or settings).</li>
+          <li><em>PNG image</em> downloads what you are looking at as an image (2× resolution, light colors) for reports and slides: the task table on the Table tab, the PERT diagram on the PERT tabs, otherwise the Gantt chart at the current zoom (switch to Weeks or Months first for a long project). Collapsed groups stay collapsed in the image; in the table image, long notes are cut short with “…”.</li>
+          <li><em>Print…</em> prints the same thing as <em>PNG image</em>, in landscape. A chart is scaled to the page width; the task table flows across as many pages as it needs, with the column headings repeated on each page. Choose “Save as PDF” in the print dialog for a PDF.</li>
+        </ul>
+      </li>
       <li><strong>PERT</strong> tab: a network diagram of the same tasks. Each box shows the row number, name, start and finish, duration, float, and assignee. Each task sits one column to the right of its last predecessor, so columns read left to right as the order of work. Arrows are dependencies (SS and FF are labeled), and the critical path is red. Collapsed groups appear as one dashed box; double-click it to expand. Double-click a task to edit it in the table. Since tasks have a single duration, this is a dependency network, not a three-point (optimistic / likely / pessimistic) PERT estimate.</li>
-      <li><strong>Export PNG</strong> downloads the current chart as an image (2× resolution, light colors) for reports and slides: the PERT diagram on the PERT tab, otherwise the Gantt chart at the current zoom (switch to Weeks or Months first for a long project).</li>
-      <li><strong>Printing</strong>: <em>Print</em> prints the current chart (the PERT diagram on the PERT tab, otherwise the Gantt chart at the current zoom); choose “Save as PDF” in the print dialog for a PDF.</li>
+
     </ul>
     <h3>Bugs and feature requests</h3>
     <p>Report problems and suggest features on the planner's <a href="https://github.com/TUEngr/ProjectPlanner/issues" target="_blank" rel="noopener">GitHub issues page</a> (a free GitHub account is needed). Search the existing issues first; if yours is already there, add a comment or a 👍 instead of opening a new one. Otherwise click <em>New issue</em> and include:</p>
     <ul class="help">
-      <li><strong>Bug</strong>: what you did, what you expected, and what happened instead, plus your browser and operating system. A screenshot helps, and so does the plan itself: use <em>Save file</em> and drag the .json file into the issue.</li>
+      <li><strong>Bug</strong>: what you did, what you expected, and what happened instead, plus your browser and operating system. A screenshot helps, and so does the plan itself: use <em>Export → JSON file</em> and drag the .json file into the issue.</li>
       <li><strong>Feature request</strong>: what you are trying to do and why. The use case matters more than a specific design.</li>
     </ul>
     <p class="hint">Issues are public. Don't attach plans that contain private information.</p>
+    <h3>What's new</h3>
+    <!-- Bump the version here and add an entry to CHANGELOG.md with each release -->
+    <p>Version <strong id="app-version">1.10.0</strong> (2026-10-07). See the <a href="https://github.com/TUEngr/ProjectPlanner/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a> for what changed in each version.</p>
     <div class="dlg-buttons"><button value="close" class="close primary">Close</button></div>
   </dialog>
 

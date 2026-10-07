@@ -14,10 +14,11 @@
   <script type="module">
     import scheduleResults from './schedule.test.js';
     import renderResults from './render.test.js';
+    import storageResults from './storage.test.js';
     import { encodeShare, decodeShare, normalize } from '../js/storage.js';
     import { samplePlan } from '../js/sample.js';
 
-    const results = [...scheduleResults, ...renderResults];
+    const results = [...scheduleResults, ...renderResults, ...storageResults];
     try {
       const plan = samplePlan();
       const frag = await encodeShare(plan);

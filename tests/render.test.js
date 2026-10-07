@@ -35,7 +35,7 @@ const hidden = hiddenIds(plan, sched);
 const csvg = ganttPrintSVG(plan, sched, 'day', hidden);
 const labelCount = (csvg.match(/class="g-row"/g) || []).length;
 const linkCount = (csvg.match(/class="g-link/g) || []).length;
-results.push([[...hidden].join() === '6,7,8,9' && labelCount === 12, `collapsed group hides rows 6-9 (${labelCount} rows drawn)`]);
+results.push([[...hidden].map(id => sched.byId.get(id).row).join() === '6,7,8,9' && labelCount === 12, `collapsed group hides rows 6-9 (${labelCount} rows drawn)`]);
 results.push([linkCount === 11, `links into a collapsed group reroute to it, internal links dropped (${linkCount} arrows, expect 11)`]);
 results.push([!/NaN|undefined|Infinity/.test(csvg), 'collapsed render has valid coordinates']);
 results.push([(csvg.match(/class="g-link critical/g) || []).length === 7, `merged link into a collapsed group stays critical (${(csvg.match(/class="g-link critical/g) || []).length} critical arrows, expect 7: 2-3, 3-4, 4-DD, DD-11, 11-14, 14-15, 15-16)`]);

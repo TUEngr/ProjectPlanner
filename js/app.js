@@ -385,7 +385,7 @@ function runCommand(cmd) {
     case 'insert': {
       let newId;
       commit(plan => {
-        newId = plan.nextId++;
+        newId = store.newTaskId(plan);
         const t = store.blankTask(newId);
         if (i < 0) { plan.tasks.push(t); return; }
         const sel = plan.tasks[i];
@@ -619,12 +619,12 @@ function wireEvents() {
 
   tbody.addEventListener('focusin', e => {
     const tr = e.target.closest('tr[data-id]');
-    if (tr) select(Number(tr.dataset.id));
+    if (tr) select(tr.dataset.id);
   });
   tbody.addEventListener('click', e => {
     const tr = e.target.closest('tr[data-id]');
     if (!tr) return;
-    const id = Number(tr.dataset.id);
+    const id = tr.dataset.id;
     select(id);
     if (e.target.closest('[data-act="toggle"]') && e.detail < 2) toggleCollapse(id);
     if (e.target.closest('[data-act="unpin"]')) {
@@ -636,7 +636,7 @@ function wireEvents() {
     const input = e.target;
     if (!input.matches?.('input[data-f]') || input.readOnly) return;
     if (input.value === input.dataset.orig) return;
-    const id = Number(input.closest('tr').dataset.id);
+    const id = input.closest('tr').dataset.id;
     const { f } = input.dataset;
     const { value } = input;
     input.dataset.orig = value;
@@ -669,19 +669,19 @@ function wireEvents() {
   attachReorder($('#table-pane'), {
     ...dragOpts,
     grip: '.c-num',
-    rows: () => [...document.querySelectorAll('#tbody tr[data-id]')].map(el => ({ id: Number(el.dataset.id), el })),
+    rows: () => [...document.querySelectorAll('#tbody tr[data-id]')].map(el => ({ id: el.dataset.id, el })),
   });
   attachReorder($('#gantt-pane'), {
     ...dragOpts,
     grip: '.g-row, .g-task, .g-row-bg',
-    rows: () => [...document.querySelectorAll('#gantt-pane .g-row .g-row-bg')].map(el => ({ id: Number(el.parentNode.dataset.id), el })),
+    rows: () => [...document.querySelectorAll('#gantt-pane .g-row .g-row-bg')].map(el => ({ id: el.parentNode.dataset.id, el })),
   });
 
   $('#gantt-pane').addEventListener('click', e => {
     const el = e.target.closest('[data-id]');
     if (!el) return;
-    select(Number(el.dataset.id));
-    if (e.target.closest('[data-act="toggle"]') && e.detail < 2) toggleCollapse(Number(el.dataset.id));
+    select(el.dataset.id);
+    if (e.target.closest('[data-act="toggle"]') && e.detail < 2) toggleCollapse(el.dataset.id);
   });
   // Double-clicking a summary row collapses or expands it (in either view);
   // on the triangle itself the first click already did that (the second is
@@ -689,15 +689,15 @@ function wireEvents() {
   const dblToggle = e => {
     if (e.target.closest('[data-act="toggle"]')) return true;
     const el = e.target.closest('[data-id]');
-    if (!el || !state.sched.byId.get(Number(el.dataset.id))?.summary) return false;
-    toggleCollapse(Number(el.dataset.id));
+    if (!el || !state.sched.byId.get(el.dataset.id)?.summary) return false;
+    toggleCollapse(el.dataset.id);
     window.getSelection()?.removeAllRanges(); // the double-click also selected a word
     return true;
   };
   tbody.addEventListener('dblclick', dblToggle);
   $('#pert-pane').addEventListener('click', e => {
     const el = e.target.closest('.pt-node');
-    if (el) select(Number(el.dataset.id));
+    if (el) select(el.dataset.id);
   });
   // Double-click: a collapsed group expands (back to the full network);
   // a task opens in the table for editing.

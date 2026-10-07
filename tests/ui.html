@@ -82,11 +82,11 @@
       hover(row(3).querySelector('.flag'));
       check(!tipEl.hidden && /predecessor 2 finishes/.test(tipEl.textContent) && tipEl.getBoundingClientRect().width > 0,
         `hovering ⚠ shows the conflict at once ("${tipEl.textContent}")`);
-      hover(d.querySelector('#gantt-pane .g-row[data-id="3"] .g-pin'));
+      hover(d.querySelector('#gantt-pane .g-row[data-id="t3"] .g-pin'));
       check(!tipEl.hidden && /^Pinned start date/.test(tipEl.textContent), `hovering the Gantt 📌 shows a tooltip ("${tipEl.textContent}")`);
       hover(row(4).querySelector('.flag.ms'));
       check(!tipEl.hidden && /Milestone/.test(tipEl.textContent), 'hovering ◆ shows "Milestone"');
-      hover(d.querySelector('#gantt-pane .g-task[data-id="13"] .g-bar'));
+      hover(d.querySelector('#gantt-pane .g-task[data-id="t13"] .g-bar'));
       check(!tipEl.hidden && /^13\. Firmware/.test(tipEl.textContent) && /float/.test(tipEl.textContent),
         `hovering a Gantt bar shows its details ("${tipEl.textContent.split('\n')[0]}")`);
       hover(cell(4, 'notes'));

@@ -6,6 +6,7 @@
 //   Task = { id, name, level, duration, preds: [Link], manualStart: 'YYYY-MM-DD'|null,
 //            pct, assignee, notes }
 //   Link = { id, type: 'FS'|'SS'|'FF' } (a bare id is accepted as FS)
+//   Ids are opaque: strings in saved plans, integers still work here.
 //
 // Hierarchy is an outline: a task is a summary if the next row has a deeper
 // level. Summary tasks roll up their children and do not take dependencies.
@@ -25,7 +26,7 @@ export const LINK_TYPES = ['FS', 'SS', 'FF'];
 // A task's links in canonical form; tolerates bare ids (older plans).
 export function linksOf(t) {
   return (t.preds || []).map(p => (typeof p === 'number' ? { id: p, type: 'FS' } : p))
-    .filter(p => Number.isInteger(p.id) && LINK_TYPES.includes(p.type));
+    .filter(p => p && (typeof p.id === 'string' ? p.id !== '' : Number.isInteger(p.id)) && LINK_TYPES.includes(p.type));
 }
 
 // Earliest start boundary that link `type` from predecessor p allows for a

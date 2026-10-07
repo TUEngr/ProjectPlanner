@@ -193,7 +193,8 @@ test('normalize upgrades bare-id predecessors and drops bad links', () => {
     { id: 1, name: 'a', duration: 1, preds: [] },
     { id: 2, name: 'b', duration: 1, preds: [1, { id: 1, type: 'SS' }, { id: 1, type: 'XX' }, 'junk'] },
   ] });
-  eq(p.tasks[1].preds, [{ id: 1, type: 'FS' }, { id: 1, type: 'SS' }]);
+  eq(p.tasks[1].preds, [{ id: 't1', type: 'FS' }, { id: 't1', type: 'SS' }]);
+  eq(p.tasks.map(t => t.id), ['t1', 't2']); // integer ids migrate to 't<n>'
 });
 
 test('collapsed groups hide descendants; nested state survives', () => {

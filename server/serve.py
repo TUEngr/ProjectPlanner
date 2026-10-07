@@ -21,7 +21,7 @@ import subprocess
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
 # data/ is deliberately not served statically: it is only reachable through the
@@ -186,7 +186,7 @@ def git_status(fetch=True):
             git('fetch', '--quiet')
         except subprocess.TimeoutExpired:
             pass
-    out = git('status', '--porcelain=v1', '--branch').stdout.splitlines()
+    out = git('status', '--porcelain=v1', '--branch', '-uall').stdout.splitlines()
     head = out[0] if out else ''
     ahead = behind = 0
     if '[' in head:
@@ -286,7 +286,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path == '/api/plan':
                     return self.send_json(200, get_plan())
                 if path == '/api/git/status':
-                    return self.send_json(200, git_status())
+                    # ?fetch=0 skips the network call: cheap local counts only
+                    query = parse_qs(urlsplit(self.path).query)
+                    return self.send_json(200, git_status(fetch=query.get('fetch') != ['0']))
             except ApiError as e:
                 return self.send_json(e.status, e.body)
             return self.send_json(404, {'error': 'not found'})

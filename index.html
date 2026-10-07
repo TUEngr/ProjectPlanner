@@ -13,6 +13,7 @@
     <div class="brand">Project Planner</div>
     <button id="plan-name" class="plan-name" title="Plan settings">Untitled</button>
     <nav class="actions">
+      <button id="btn-sync" class="primary" hidden title="Save, commit your changes, pull your teammates' changes and push to GitHub">Sync</button>
       <button id="btn-plans" title="Open, create, or delete plans">Plans</button>
       <button id="btn-settings" class="edit-only" title="Project start date and holidays">Settings</button>
       <button id="btn-export" title="Download this plan as a JSON file">Save file</button>
@@ -127,6 +128,38 @@
     <p id="share-size" class="hint"></p>
     <div class="dlg-buttons">
       <button id="btn-copy-share" class="primary">Copy link</button>
+      <button value="close" class="close">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-sync">
+    <form method="dialog" id="sync-form">
+      <h2>Sync with GitHub</h2>
+      <p id="sync-summary" class="hint"></p>
+      <label>Commit message <input name="message" required maxlength="200" autocomplete="off"></label>
+      <p class="hint">Your changes are committed, your teammates' changes are pulled in, then everything is pushed.</p>
+      <div class="dlg-buttons">
+        <button value="sync" class="primary">Sync</button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-conflict">
+    <h2>The same task was changed twice</h2>
+    <p>The plan on disk changed while you were editing (for example after a pull), and these tasks were changed both there and by you. Nothing has been overwritten. Choose which version to keep for them; your other edits are saved either way.</p>
+    <ul id="conflict-list" class="plan-list"></ul>
+    <div class="dlg-buttons">
+      <button id="btn-keep-mine" class="primary">Keep my changes</button>
+      <button id="btn-keep-theirs">Use the other version</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-problem">
+    <h2 id="problem-title"></h2>
+    <div id="problem-body"></div>
+    <div class="dlg-buttons">
+      <button id="btn-problem-reload" hidden>Reload page</button>
       <button value="close" class="close">Close</button>
     </div>
   </dialog>

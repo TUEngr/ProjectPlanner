@@ -159,5 +159,38 @@ export function planFromFiles(files) {
   const order = (a, b) => (isRank(a.rank) !== isRank(b.rank) ? (isRank(a.rank) ? -1 : 1)
     : a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   tasks.sort(order);
-  return normalize({ ...base, tasks });
+  const plan = normalize({ ...base, tasks });
+  // A merge can leave a link to a task someone else deleted; drop it.
+  const ids = new Set(plan.tasks.map(t => t.id));
+  for (const t of plan.tasks) t.preds = t.preds.filter(l => ids.has(l.id));
+  return plan;
+}
+
+// ---- Comparing and merging file sets ----
+
+export function sameFiles(a, b) {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every(k => a[k] === b[k]);
+}
+
+// Three-way merge of two file sets that both started from `base`.
+// A file changed (or added, or deleted) on one side only takes that side's
+// version. A file changed on both sides differently is a conflict: it is
+// listed, and resolved by `prefer` ('mine' | 'theirs') or, with none, kept as mine.
+export function mergeFiles(base, mine, theirs, prefer = null) {
+  const files = {}, conflicts = [];
+  for (const path of new Set([...Object.keys(base), ...Object.keys(mine), ...Object.keys(theirs)])) {
+    const b = base[path], m = mine[path], t = theirs[path];
+    let v;
+    if (m === t) v = m;
+    else if (m === b) v = t;
+    else if (t === b) v = m;
+    else {
+      conflicts.push(path);
+      v = prefer === 'theirs' ? t : m;
+    }
+    if (v !== undefined) files[path] = v;
+  }
+  if (files[PLAN_FILE] === undefined) files[PLAN_FILE] = mine[PLAN_FILE] ?? theirs[PLAN_FILE] ?? base[PLAN_FILE];
+  return { files, conflicts: conflicts.sort() };
 }

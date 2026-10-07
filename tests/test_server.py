@@ -371,6 +371,21 @@ class GitSync(unittest.TestCase):
         self.assertEqual(self.sync(self.a, 'x')[0], 200)
         self.assertNotIn('notes.txt', run(self.a, 'ls-files').stdout)
 
+    def test_status_fetch_flag_controls_whether_the_remote_is_contacted(self):
+        self.write(self.a, 'data/tasks/t2.json', TASK('t2'))
+        self.assertEqual(self.sync(self.a, 'A adds t2')[0], 200)
+        with root(self.b):
+            self.assertEqual(serve.git_status(fetch=False)['behind'], 0)   # has not looked at the remote
+            self.assertEqual(serve.git_status(fetch=True)['behind'], 1)    # now it has
+
+    def test_status_lists_untracked_files_individually(self):
+        os.makedirs(os.path.join(self.b, 'data/newdir/deeper'))
+        self.write(self.b, 'data/newdir/deeper/x.json', '{}')
+        self.write(self.b, 'data/newdir/y.json', '{}')
+        with root(self.b):
+            dirty = serve.git_status(fetch=False)['dirty']
+        self.assertEqual(sorted(dirty), ['data/newdir/deeper/x.json', 'data/newdir/y.json'])
+
     def test_sync_with_nothing_to_commit_is_ok(self):
         status, body = self.sync(self.a, 'nothing')
         self.assertEqual((status, body['dirty']), (200, []))
@@ -395,6 +410,12 @@ class SyncRequestValidation(ServerCase):
     def test_message_is_required_and_bounded(self):
         for body in ({}, {'message': ''}, {'message': '   '}, {'message': 5}, {'message': 'x' * 501}, [], None):
             self.assertEqual(self.call('POST', '/api/git/sync', body)[0], 400, repr(body)[:40])
+
+    def test_status_endpoint_accepts_the_fetch_flag(self):
+        for q in ('', '?fetch=0', '?fetch=1', '?fetch=junk'):
+            status, body = self.call('GET', '/api/git/status' + q)
+            self.assertIn(status, (200, 500), q)   # temp dir is not a git repo; the route must still be reached
+        self.assertEqual(self.call('GET', '/api/git/status?fetch=0', token=False)[0], 403)
 
     def test_unknown_routes(self):
         self.assertEqual(self.call('GET', '/api/nope')[0], 404)

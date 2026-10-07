@@ -8,6 +8,7 @@ import * as store from './storage.js';
 import { samplePlan } from './sample.js';
 import { attachReorder } from './reorder.js';
 import { renderPert, pertPrintSVG, pertStandaloneSVG } from './pert.js';
+import { RepoApi, RepoSession, repoToken } from './repo.js';
 
 const $ = sel => document.querySelector(sel);
 const PREFS_KEY = 'projectplanner.prefs';
@@ -26,6 +27,9 @@ const state = {
   sched: null,
   selectedId: null,
   readOnly: false,
+  repo: null,    // RepoSession when the plan lives in a git clone (served by server/serve.py)
+  git: null,     // last git status from the helper
+  locked: false, // true while syncing: no edits
   hidden: new Set(), // ids of rows inside collapsed summaries (recomputed by render)
   view: 'split',
   zoom: 'day',
@@ -101,12 +105,17 @@ function openPlan(plan, { readOnly = false } = {}) {
 
 function persist() {
   if (state.readOnly) return;
+  if (state.repo) { // repo mode: the clone's data/ is the store; collapse state stays per person
+    saveCollapsed();
+    state.repo.markDirty();
+    return;
+  }
   if (!store.savePlan(state.plan)) toast('Could not save to browser storage. Use “Save file” to keep your work.', 'error');
 }
 
 // Wrap every edit: snapshot for undo, mutate, save, re-render.
 function commit(mutator) {
-  if (state.readOnly) return;
+  if (state.readOnly || state.locked) return;
   const before = JSON.stringify(state.plan);
   const result = mutator(state.plan);
   if (result === false) return; // mutator rejected the change
@@ -119,6 +128,7 @@ function commit(mutator) {
 }
 
 function undo() {
+  if (state.locked) return;
   if (!state.undo.length) return toast('Nothing to undo');
   state.redo.push(JSON.stringify(state.plan));
   state.plan = JSON.parse(state.undo.pop());
@@ -126,11 +136,205 @@ function undo() {
   render();
 }
 function redo() {
+  if (state.locked) return;
   if (!state.redo.length) return toast('Nothing to redo');
   state.undo.push(JSON.stringify(state.plan));
   state.plan = JSON.parse(state.redo.pop());
   persist();
   render();
+}
+
+// ---------- repo mode ----------
+// When served by server/serve.py the plan is data/ in this git clone. Edits are
+// saved to disk automatically; Sync commits, pulls teammates' changes and pushes.
+// Which groups are collapsed is a per-person view choice, kept in this browser.
+
+const collapsedKey = id => `projectplanner.collapsed.${id}`;
+
+function applyCollapsed(plan) {
+  try {
+    const ids = new Set(JSON.parse(localStorage.getItem(collapsedKey(plan.id)) || '[]'));
+    for (const t of plan.tasks) t.collapsed = ids.has(t.id);
+  } catch { /* all expanded */ }
+  return plan;
+}
+function saveCollapsed() {
+  try { localStorage.setItem(collapsedKey(state.plan.id), JSON.stringify(state.plan.tasks.filter(t => t.collapsed).map(t => t.id))); } catch { /* ignore */ }
+}
+
+// The plan changed under the user (a merge or a pull): show it, keep the selection.
+function adoptPlan(plan) {
+  applyCollapsed(plan);
+  const keep = state.selectedId;
+  state.plan = plan;
+  state.selectedId = plan.tasks.some(t => t.id === keep) ? keep : plan.tasks[0]?.id ?? null;
+  state.undo = [];
+  state.redo = [];
+  render();
+}
+
+const dataFiles = g => (g?.dirty || []).filter(p => p.startsWith('data/'));
+
+function repoSaveText() {
+  const r = state.repo;
+  const disk = {
+    saved: 'Saved to disk', dirty: 'Unsaved changes…', saving: 'Saving…',
+    error: `<span class="warn-text">⚠ Not saved: ${esc(r.error || 'unknown error')}</span>`,
+    conflict: '<span class="warn-text">⚠ Conflict: choose a version</span>',
+  }[r.state];
+  const g = state.git;
+  if (!g) return disk;
+  const n = dataFiles(g).length;
+  const bits = [esc(g.branch)];
+  if (n) bits.push(`${n} file${n > 1 ? 's' : ''} to commit`);
+  if (g.ahead) bits.push(`${g.ahead} to push`);
+  if (g.behind) bits.push(`${g.behind} to pull`);
+  if (bits.length === 1) bits.push('in sync');
+  return `${disk} · ${bits.join(' · ')}`;
+}
+
+function updateSyncButton() {
+  const g = state.git, b = $('#btn-sync');
+  b.classList.toggle('attention', !!g && (dataFiles(g).length > 0 || g.ahead > 0 || g.behind > 0));
+}
+
+let gitBusy = false, gitAgain = false;
+async function refreshGit(full = true) {
+  if (!state.repo) return;
+  if (gitBusy) { gitAgain = gitAgain || full; return; }
+  gitBusy = true;
+  try { state.git = await state.repo.api.status(full); } catch { /* keep the last known status */ }
+  gitBusy = false;
+  if (state.sched) renderStatus();
+  updateSyncButton();
+  if (gitAgain) { gitAgain = false; refreshGit(true); }
+}
+
+function onRepoState(st) {
+  if (state.sched) renderStatus();
+  if (st === 'conflict') showDiskConflict();
+  if (st === 'error') toast(`Could not save: ${state.repo.error}`, 'error');
+  if (st === 'saved') refreshGit(false);
+}
+
+function showProblem(title, text, { reload = false } = {}) {
+  $('#problem-title').textContent = title;
+  $('#problem-body').textContent = text;
+  $('#btn-problem-reload').hidden = !reload;
+  const dlg = $('#dlg-problem');
+  if (!dlg.open) dlg.showModal();
+}
+
+// A task named in a data/ path, for messages.
+function taskLabel(path, ...sources) {
+  if (path === 'data/plan.json') return 'Plan settings';
+  for (const files of sources) {
+    try { const name = JSON.parse(files[path]).name; if (name) return name; } catch { /* next */ }
+  }
+  return path.replace('data/tasks/', '').replace('.json', '');
+}
+
+function showDiskConflict() {
+  const { mine, theirs, paths } = state.repo.conflict;
+  const name = (files, p) => { try { return JSON.parse(files[p]).name || '(unnamed)'; } catch { return '(deleted)'; } };
+  $('#conflict-list').innerHTML = paths.map(p => `
+    <li class="conflict-item"><b>${esc(taskLabel(p, mine, theirs))}</b>
+      <span class="side">Yours: ${esc(name(mine, p))}</span><span class="side">Other: ${esc(name(theirs, p))}</span></li>`).join('');
+  const dlg = $('#dlg-conflict');
+  if (!dlg.open) dlg.showModal();
+}
+
+function lockUI(on) {
+  state.locked = on;
+  document.body.classList.toggle('syncing', on);
+  const b = $('#btn-sync');
+  b.disabled = on;
+  b.textContent = on ? 'Syncing…' : 'Sync';
+  if (on) document.activeElement?.blur?.();
+}
+
+function defaultCommitMessage(files) {
+  const tasks = files.filter(p => p.startsWith('data/tasks/')).length;
+  const parts = [];
+  if (files.includes('data/plan.json')) parts.push('plan settings');
+  if (tasks) parts.push(`${tasks} task${tasks > 1 ? 's' : ''}`);
+  return `Update ${parts.join(' and ') || 'plan'}`;
+}
+
+async function startSync() {
+  const s = state.repo;
+  if (!s || state.locked) return;
+  try { await s.flush(); } catch (e) { return toast(e.message, 'error'); }
+  if (s.state !== 'saved') return;
+  await refreshGit(true);
+  const g = state.git;
+  if (!g) return toast('Could not read the git status.', 'error');
+  const files = dataFiles(g);
+  if (!files.length) { // nothing to commit: only pull and/or push
+    if (!g.ahead && !g.behind) return toast('Already in sync with GitHub.');
+    return runSync('Sync');
+  }
+  $('#sync-summary').textContent = `${files.length} changed file${files.length > 1 ? 's' : ''} will be committed on branch ${g.branch}`
+    + (g.behind ? `; ${g.behind} commit${g.behind > 1 ? 's' : ''} from your teammates will be pulled in.` : '.');
+  const f = $('#sync-form');
+  f.message.value = defaultCommitMessage(files);
+  $('#dlg-sync').showModal();
+  f.message.select();
+}
+
+async function runSync(message) {
+  const s = state.repo;
+  const behind = state.git?.behind || 0;
+  lockUI(true);
+  try {
+    const r = await s.sync(message.trim() || 'Sync');
+    if (r.status === 'ok') {
+      toast(`Synced with GitHub${behind ? `; pulled ${behind} new commit${behind > 1 ? 's' : ''}` : ''}.`);
+    } else if (r.status === 'conflict') {
+      const names = r.files.map(p => `• ${taskLabel(p, s.base)}`).join('\n');
+      showProblem('Your teammate changed the same task',
+        `Both of you changed:\n${names}\n\nYour changes are saved and committed on your side, and nothing was lost. Resolving this inside the app is coming in the next update. For now, either ask your teammate to sync first and then sync again, or resolve it in the terminal (git pull, fix the files, git commit) and reload this page.`);
+    } else if (r.status === 'error') {
+      showProblem('Sync did not complete', r.message);
+    }
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    lockUI(false);
+    refreshGit(true);
+  }
+}
+
+async function initRepo(token) {
+  const session = new RepoSession(new RepoApi(token), { getPlan: () => state.plan, adopt: adoptPlan, onState: onRepoState });
+  state.repo = session;
+  let plan, created = false;
+  try {
+    plan = await session.load();
+    if (!plan) { // a clone with no plan yet: start this project's plan
+      plan = store.newPlan();
+      await session.create(plan);
+      created = true;
+    }
+  } catch (e) {
+    // Never fall back to browser storage here: that would quietly fork the plan.
+    openPlan(store.newPlan(), { readOnly: true });
+    $('#readonly-banner').hidden = true;
+    return showProblem('Cannot open this project', e.message, { reload: true });
+  }
+  document.body.classList.add('repo-mode');
+  $('#btn-sync').hidden = false;
+  openPlan(applyCollapsed(plan));
+  if (created) showSettings();
+  refreshGit(true);
+  setInterval(() => { if (!document.hidden) refreshGit(true); }, 60000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) session.flush().catch(() => {});
+    else session.refresh().catch(() => {}).then(() => refreshGit(true));
+  });
+  window.addEventListener('beforeunload', e => {
+    if (session.state !== 'saved') { e.preventDefault(); e.returnValue = ''; }
+  });
 }
 
 // ---------- rendering ----------
@@ -213,7 +417,7 @@ function renderStatus() {
     `<span><b>${leaves.length}</b> tasks, <span class="crit-text">${crit} critical</span></span>`,
     `<span><b>${done}%</b> complete</span>`,
     issues ? `<span class="warn-text">⚠ ${issues} warning${issues > 1 ? 's' : ''}</span>` : '',
-    `<span class="save-state">${state.readOnly ? 'Read-only' : 'Saved in this browser'}</span>`,
+    `<span class="save-state">${state.readOnly ? 'Read-only' : state.repo ? repoSaveText() : 'Saved in this browser'}</span>`,
   ].join('');
 }
 
@@ -582,6 +786,17 @@ async function exportPNG() {
 async function importFile(file) {
   try {
     const plan = store.normalize(JSON.parse(await file.text()));
+    if (state.repo) { // replace this project's plan; git keeps the old version
+      if (!confirm(`Replace this project's plan with “${plan.name}” from the file?\n\nGit keeps the previous version, and Undo is available.`)) return;
+      plan.id = state.plan.id;
+      state.undo.push(JSON.stringify(state.plan));
+      state.redo = [];
+      state.plan = plan;
+      state.selectedId = plan.tasks[0]?.id ?? null;
+      persist();
+      render({ scrollGantt: true });
+      return toast(`Replaced the plan with “${plan.name}”.`);
+    }
     if (store.listPlans().some(p => p.id === plan.id)) {
       if (!confirm(`A plan with this ID (“${store.loadPlan(plan.id)?.name}”) already exists in this browser.\n\nOK = replace it with the file\nCancel = keep both (import as a copy)`)) {
         plan.id = store.uid();
@@ -731,6 +946,18 @@ function wireEvents() {
   $('#plan-name').addEventListener('click', () => state.readOnly ? null : showSettings());
   $('#btn-settings').addEventListener('click', showSettings);
   $('#btn-plans').addEventListener('click', showPlans);
+  $('#btn-sync').addEventListener('click', startSync);
+  $('#sync-form').addEventListener('submit', e => {
+    if (e.submitter?.value === 'sync') runSync(new FormData(e.target).get('message') || '');
+  });
+  $('#dlg-conflict').addEventListener('cancel', e => e.preventDefault()); // must choose
+  for (const [id, side] of [['#btn-keep-mine', 'mine'], ['#btn-keep-theirs', 'theirs']]) {
+    $(id).addEventListener('click', async () => {
+      $('#dlg-conflict').close();
+      try { await state.repo.resolveConflict(side); } catch (e) { toast(e.message, 'error'); }
+    });
+  }
+  $('#btn-problem-reload').addEventListener('click', () => location.reload());
   $('#btn-export').addEventListener('click', () => {
     store.downloadText(`${store.safeFilename(state.plan.name)}.json`, store.planToJSON(state.plan));
   });
@@ -830,7 +1057,7 @@ function wireEvents() {
 }
 
 async function loadFromHash() {
-  if (!location.hash.startsWith('#share=')) return false;
+  if (state.repo || !location.hash.startsWith('#share=')) return false; // repo mode never shows other plans
   try {
     const plan = await store.decodeShare(location.hash);
     openPlan(plan, { readOnly: true });
@@ -850,6 +1077,8 @@ async function init() {
   if (!store.storageAvailable()) {
     toast('Browser storage is unavailable (private mode?). Use “Save file” to keep your work.', 'error');
   }
+  const token = repoToken();
+  if (token) return initRepo(token);
   if (!(await loadFromHash())) openPlan(loadInitialPlan());
 }
 

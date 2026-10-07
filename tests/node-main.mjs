@@ -2,8 +2,11 @@
 import scheduleResults from './schedule.test.js';
 import renderResults from './render.test.js';
 import storageResults from './storage.test.js';
+import repoResults, { ready } from './repo.test.js';
 
-const results = [...scheduleResults, ...renderResults, ...storageResults];
+await ready; // async tests finish before reporting
+
+const results = [...scheduleResults, ...renderResults, ...storageResults, ...repoResults];
 let failed = 0;
 for (const [ok, msg] of results) {
   if (!ok) failed++;

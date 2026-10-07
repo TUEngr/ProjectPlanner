@@ -353,3 +353,10 @@ body.dragging-row, body.dragging-row * { cursor: grabbing !important; user-selec
 .pt-tag-bg { fill: var(--bg); stroke: var(--border); }
 .pt-tag { fill: var(--fg-muted); font-size: 10px; font-weight: 700; font-family: var(--font); }
 .pt-tag.critical { fill: var(--crit); }
+
+/* ---- repo mode (plan stored in a git clone) ---- */
+body.repo-mode #btn-plans, body.repo-mode #btn-share { display: none; }
+body.syncing #main, body.syncing .toolbar { pointer-events: none; opacity: .55; }
+#btn-sync.attention::after { content: ' \2022'; }
+.conflict-item .side { display: block; font-weight: 400; color: var(--fg-muted); font-size: 13px; }
+#problem-body { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 46ch; }

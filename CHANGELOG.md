@@ -4,6 +4,11 @@ What changed in each version of [Project Planner](https://tuengr.github.io/Proje
 
 Version numbers: the middle number goes up for new features, the last number for fixes and smaller improvements.
 
+## 1.10.0 — 2026-10-07
+- Project repositories: a team can keep one shared plan in a git repository (make it from the GitHub template and open it in a Codespace). The plan is saved to the repository's `data` folder as it is edited, one small file per task, so different people's edits merge cleanly. A Sync button commits, pulls your teammates' changes and pushes. When two people change the same thing, a dialog asks which version to keep, and only for what really clashes. Collapsed groups stay in each person's own browser. See the README.
+- Each project repository can publish its own site on GitHub Pages. The site shows the app only; the plan is published, read-only, only if the owner turns that on.
+- Tasks now have short random ids, so two people adding tasks at the same time cannot collide. Plans and files from earlier versions open as before.
+
 ## 1.9.1 — 2026-10-06
 - Near-critical tasks now default to 2 working days of float or less (was 5). Plans that already have a setting keep it; change it in Settings → Critical path.
 

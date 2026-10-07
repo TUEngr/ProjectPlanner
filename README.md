@@ -39,11 +39,17 @@ If you and a teammate changed the *same thing*, Sync shows a small dialog asking
 
 Each repository can publish its own site at `https://<owner>.github.io/<repository>/`, built by a workflow in `.github/workflows/pages.yml`. By default it publishes **only the planner itself, never your plan**.
 
-**One-time setup.** In your repository: **Settings → Pages → Build and deployment → Source: GitHub Actions**. Until you do this the workflow finishes green and leaves a note saying so. Pages from a *private* repository needs a paid GitHub plan (GitHub Pro, which is included with the Student Developer Pack, Team or Enterprise).
+**One-time setup** (three steps, about two minutes):
 
-**Publishing the plan is opt-in.** To publish a read-only view of the plan on that site, add a repository variable: **Settings → Secrets and variables → Actions → Variables → New repository variable**, name `PUBLISH_PLAN`, value `true`. The site then shows your plan, updated on every push to `main`, with an **Open in Codespaces to edit** button.
+1. **Switch Pages on.** In your repository: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. **Run the workflow once.** Open the **Actions** tab, click **Publish site** in the list on the left, then **Run workflow** (keep the `main` branch selected) and wait for the green tick, about a minute. If the Actions tab asks you to enable workflows (new forks only), click **I understand my workflows, go ahead and enable them** first.
+3. **Find your site.** Its address is shown at the end of the run (in the *deploy* job) and under **Settings → Pages**: `https://<owner>.github.io/<repository>/`.
 
-> **A Pages site is public on the internet, even when the repository is private.** Anyone with the link can read the published plan. Do not set `PUBLISH_PLAN` for a plan that must stay private. To stop publishing, delete the variable (or set it to anything other than `true`) and push; the next build removes the plan from the site. Copies that someone already saved, or that a search engine or the Internet Archive already fetched, cannot be recalled.
+After that, every push to `main` updates the site by itself. Step 2 is needed because the workflow only runs when something is pushed to `main`, so a site you switch on *afterwards* stays empty until you run it once. Until step 1 is done the workflow still finishes green and leaves a note saying what to switch on. Pages from a *private* repository needs a paid GitHub plan (GitHub Pro, which is included with the Student Developer Pack, Team or Enterprise).
+
+**Publishing the plan is opt-in.** To publish a read-only view of the plan on that site, add a repository variable: **Settings → Secrets and variables → Actions → Variables → New repository variable**, name `PUBLISH_PLAN`, value `true`. Then run the workflow again (**Actions → Publish site → Run workflow**), or just push a change. The site then shows your plan, updated on every push to `main`, with an **Open in Codespaces to edit** button.
+
+> **A Pages site is public on the internet, even when the repository is private.** Anyone with the link can read the published plan. Do not set `PUBLISH_PLAN` for a plan that must stay private. To stop publishing, delete the variable (or set it to anything other than `true`) and run the workflow again; the new build removes the plan from the site. Copies that someone already saved, or that a search engine or the Internet Archive already fetched, cannot be recalled.
 
 ## Who can see and edit what
 
@@ -71,6 +77,7 @@ Each repository can publish its own site at `https://<owner>.github.io/<reposito
 | "Cannot reach the Project Planner helper" | The Codespace stopped or the helper restarted. Reopen the Codespace, then reload the page. |
 | "The helper was restarted or this page is out of date" | Reload the page (the helper makes a new token each time it starts). |
 | Nothing opened after the Codespace started | Open the **Ports** tab, find port 8765 and click the globe icon. Or run `bash server/start.sh` in the terminal, which prints the address. |
+| The site shows a 404, or the example planner instead of your plan | Check that **Settings → Pages → Source** is *GitHub Actions*; that the latest **Publish site** run in the Actions tab is green (run it if there is none); and that `PUBLISH_PLAN` is exactly `true` and the workflow was run *after* you added it. Then hard-refresh the page. |
 | To restart the helper | `bash server/start.sh restart`, then reload the page. |
 | Sync says the push failed with "no upstream branch" | You are on a new branch. Run `git push -u origin HEAD` once, then press Sync. |
 | "This conflict cannot be resolved in the app" | The conflict is in a file that is not plan data. Resolve it in the terminal (`git pull`, fix the files, `git commit`), then reload. |

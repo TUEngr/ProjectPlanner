@@ -17,7 +17,7 @@ if build_type=$(gh api "repos/$repo/pages" --jq '.build_type' 2>"$err"); then
     echo "enabled=false" >> "$out"
   fi
 elif grep -qiE '404|not found' "$err"; then
-  echo "::notice title=GitHub Pages is not enabled yet::To publish this site, go to Settings > Pages and set Source to GitHub Actions, then re-run this workflow."
+  echo "::notice title=GitHub Pages is not enabled yet::To publish this site, go to Settings > Pages and set Source to GitHub Actions. Then open the Actions tab, choose Publish site and click Run workflow."
   echo "enabled=false" >> "$out"
 else
   # Could not tell (permissions, network). Try to deploy; a real problem will show there.

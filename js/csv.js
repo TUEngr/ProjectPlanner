@@ -99,22 +99,40 @@ const ALIASES = {
 };
 const key = s => s.toLowerCase().replace(/[^a-z0-9%# ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-// Turn CSV text into a plan object (to be passed through storage.normalize).
-// parsePreds parses "2, 5SS" into [{row, type}] (table.js parsePredList).
-// Returns { plan, warnings }; throws with a readable message if unusable.
-export function csvToPlan(text, { name = 'Imported plan', parsePreds, isoDate }) {
-  const rows = parseCSV(text);
-  if (rows.length < 2) throw new Error('The CSV file needs a header row and at least one task.');
-  const head = rows[0].map(key);
+// Columns found in a header row: { field: index }
+function headerColumns(row) {
+  const head = row.map(c => key(String(c ?? '')));
   const col = {};
   for (const [f, names] of Object.entries(ALIASES)) {
     const k = head.findIndex(h => names.includes(h));
     if (k >= 0) col[f] = k;
   }
-  if (col.name === undefined) throw new Error('The CSV file needs a “Task” (or “Name”) column.');
-  const get = (r, f) => (col[f] === undefined ? '' : (r[col[f]] ?? '').trim());
+  return col;
+}
+
+// Index of the header row: the first row (of the first 20) with a Task/Name
+// column, so title rows above the table are skipped. -1 if none.
+export function findHeaderRow(rows) {
+  return rows.slice(0, 20).findIndex(r => headerColumns(r).name !== undefined);
+}
+
+// Turn CSV text into a plan object (to be passed through storage.normalize).
+// parsePreds parses "2, 5SS" into [{row, type}] (table.js parsePredList).
+// Returns { plan, warnings }; throws with a readable message if unusable.
+export function csvToPlan(text, opts) {
+  return rowsToPlan(parseCSV(text), { ...opts, what: 'CSV file' });
+}
+
+// Same, from rows already split into cells (a CSV file, or a spreadsheet).
+export function rowsToPlan(allRows, { name = 'Imported plan', parsePreds, isoDate, what = 'file' }) {
+  const rows = allRows.filter(r => r.some(f => String(f ?? '').trim() !== ''));
+  const h = findHeaderRow(rows);
+  if (h < 0) throw new Error(`The ${what} needs a “Task” (or “Name”) column, with column names in a header row.`);
+  const col = headerColumns(rows[h]);
+  if (rows.length - h < 2) throw new Error(`The ${what} needs a header row and at least one task.`);
+  const get = (r, f) => (col[f] === undefined ? '' : String(r[col[f]] ?? '').trim());
   const warnings = [];
-  const body = rows.slice(1);
+  const body = rows.slice(h + 1);
 
   // Row numbers used by the Predecessors column: the Row column if present
   // and usable, otherwise the line order
@@ -168,17 +186,18 @@ export function csvToPlan(text, { name = 'Imported plan', parsePreds, isoDate })
   };
 }
 
-// A starter CSV in the layout the importer reads, with rows showing each
-// feature. Offered when an import fails.
+// Starter table in the layout the importer reads, with rows showing each
+// feature. Offered as CSV and Excel templates when an import fails.
+export const TEMPLATE_ROWS = [
+  ['Row', 'Outline level', 'Task', 'Type', 'Duration (working days)', 'Predecessors', '% complete', 'Assignee', 'Notes', 'Pinned start'],
+  [1, 1, 'Phase 1', 'Summary', '', '', '', '', 'A summary groups the rows below it with a higher outline level; its dates are calculated', ''],
+  [2, 2, 'Design', 'Task', 5, '', 0, 'Alex', 'Duration is in working days', ''],
+  [3, 2, 'Build', 'Task', 10, '2', 0, 'Sam', 'Predecessors are row numbers: 2 = starts after row 2 finishes', ''],
+  [4, 2, 'Write test plan', 'Task', 3, '3SS', 0, 'Jordan', '3SS = starts no earlier than row 3 starts; 3FF = finishes no earlier than row 3 finishes', ''],
+  [5, 1, 'Design review', 'Milestone', 0, '3, 4', 0, 'Advisor', 'Duration 0 is a milestone. Several predecessors are separated by commas', ''],
+  [6, 1, 'Final demo', 'Task', 1, '5', 0, 'Team', 'Pinned start (YYYY-MM-DD) fixes the start date; leave it blank to schedule from predecessors', ''],
+];
+
 export function csvTemplate() {
-  const rows = [
-    ['Row', 'Outline level', 'Task', 'Type', 'Duration (working days)', 'Predecessors', '% complete', 'Assignee', 'Notes', 'Pinned start'],
-    [1, 1, 'Phase 1', 'Summary', '', '', '', '', 'A summary groups the rows below it with a higher outline level; its dates are calculated', ''],
-    [2, 2, 'Design', 'Task', 5, '', 0, 'Alex', 'Duration is in working days', ''],
-    [3, 2, 'Build', 'Task', 10, '2', 0, 'Sam', 'Predecessors are row numbers: 2 = starts after row 2 finishes', ''],
-    [4, 2, 'Write test plan', 'Task', 3, '3SS', 0, 'Jordan', '3SS = starts no earlier than row 3 starts; 3FF = finishes no earlier than row 3 finishes', ''],
-    [5, 1, 'Design review', 'Milestone', 0, '3, 4', 0, 'Advisor', 'Duration 0 is a milestone. Several predecessors are separated by commas', ''],
-    [6, 1, 'Final demo', 'Task', 1, '5', 0, 'Team', 'Pinned start (YYYY-MM-DD) fixes the start date; leave it blank to schedule from predecessors', ''],
-  ];
-  return '﻿' + rows.map(r => r.map(cell).join(',')).join('\r\n') + '\r\n';
+  return '\uFEFF' + TEMPLATE_ROWS.map(r => r.map(cell).join(',')).join('\r\n') + '\r\n';
 }

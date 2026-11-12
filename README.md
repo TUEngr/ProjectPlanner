@@ -22,7 +22,7 @@ A browser-based project planner with a task table and a Gantt chart. The Gantt c
 No server is involved. Plans are stored in each user's browser (localStorage).
 
 - **Export → JSON file / Open → JSON file** writes or reads the full plan as JSON, for backups or for moving a plan between machines.
-- **Open → CSV file** builds a new plan from a task table (Excel, Google Sheets, or Export → CSV). A failed import offers a template CSV.
+- **Open → Excel file / CSV file** builds a new plan from a task table (an .xlsx workbook, or CSV from Excel, Google Sheets, or Export → CSV). The .xlsx reader and the small writer used for the template are built in (`js/xlsx.js`, no library). A failed import offers Excel and CSV templates.
 - **Export → Read-only link** puts a compressed, read-only copy of the plan in the URL fragment (`#share=…`). The fragment is never sent to a server. Recipients can save their own editable copy.
 - **Export → CSV file** downloads the task table (WBS, dates, links, float, critical) for spreadsheets; it can be re-imported.
 - **Export → PNG image** downloads the current view (task table, Gantt chart, or PERT diagram) as an image for reports.
@@ -47,3 +47,4 @@ Tests:
 - `tests/ui.html` drives the real app in an iframe.
 - `tests/mobile.html` checks the phone layout in phone-sized frames (landscape and portrait).
 - `tests/collab.html` plays out shared-plan turn-taking with three test users in separate frames.
+- `node tests/run-ui.mjs` runs `ui.html` and `mobile.html` (add `collab.html` by naming the pages: `node tests/run-ui.mjs ui.html mobile.html collab.html`) in headless Chrome from the command line (Node 22+; set `CHROME` if Chrome isn't in the default location). It runs in real time with focus emulation; Chrome's `--virtual-time-budget` makes the import tests check too early.

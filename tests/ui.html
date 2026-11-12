@@ -299,6 +299,66 @@
       await sleep(60);
       check(count() === rowsBefore, 'single click on the triangle expands');
 
+      // ---- Gantt bars, zoom steps, dragging bar ends, theme ----
+      d.querySelector('.tabs button[data-view="split"]').click(); await sleep(60);
+      const zsel = d.getElementById('zoom');
+      zsel.value = 'day'; zsel.dispatchEvent(new w.Event('change')); await sleep(60);
+      const bodyW = () => d.querySelector('#gantt-pane .g-body svg').width.baseVal.value;
+      const bars = [...d.querySelectorAll('#gantt-pane .g-task')].filter(g => g.querySelector('.g-bar'));
+      const zeroBar = bars.find(g => cellOf(g, 'pct').value.replace('%', '') === '0');
+      function cellOf(g, f) { return d.querySelector(`#tbody tr[data-id="${g.dataset.id}"] input[data-f="${f}"]`); }
+      check(bars.length && bars.every(g => g.querySelectorAll('.g-handle').length === 2), `every task bar has two drag handles (${bars.length} bars)`);
+      check(!zeroBar || !zeroBar.querySelector('.g-progress'), 'a 0% bar is the outlined track only, no solid part');
+      const w0 = bodyW();
+      d.getElementById('zoom-in').click(); await sleep(60);
+      check(bodyW() > w0 * 1.2 && zsel.value === 'custom', `Zoom + widens the chart (${w0} → ${bodyW()}) and the dropdown shows Custom`);
+      d.getElementById('zoom-out').click(); await sleep(60);
+      check(Math.abs(bodyW() - w0) < 1 && zsel.value === 'day', 'Zoom − returns to the Days preset');
+      d.getElementById('zoom-out').click(); d.getElementById('zoom-out').click(); await sleep(60);
+      check(bodyW() < w0 && zsel.value === 'custom', `two Zoom − steps narrow the chart (${bodyW()})`);
+      zsel.value = 'day'; zsel.dispatchEvent(new w.Event('change')); await sleep(60);
+
+      const task = [...d.querySelectorAll('#gantt-pane .g-task')].find(g => g.querySelector('.g-handle') && !cellOf(g, 'start').closest('.pinned'));
+      const tid = task.dataset.id;
+      const handle = (edge) => d.querySelector(`#gantt-pane .g-task[data-id="${tid}"] .g-handle[data-edge="${edge}"]`);
+      const tcell = f => d.querySelector(`#tbody tr[data-id="${tid}"] input[data-f="${f}"]`);
+      const barDrag = async (el, dx) => {
+        const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+        const ev = (type, cx) => el.dispatchEvent(new w.PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 9, button: 0, clientX: cx, clientY: y }));
+        ev('pointerdown', x); ev('pointermove', x + dx / 2); ev('pointermove', x + dx); ev('pointerup', x + dx);
+        await sleep(80);
+      };
+      const n0rows = count(), dur0 = parseFloat(tcell('duration').value), start0 = tcell('start').value, fin0 = tcell('finish').value;
+      await barDrag(handle('end'), 26 * 7);
+      check(parseFloat(tcell('duration').value) === dur0 + 5 && tcell('start').value === start0 && count() === n0rows,
+        `dragging the right end a week later adds 5 working days (${dur0} → ${tcell('duration').value}); start unchanged; no reorder`);
+      await click('undo');
+      await barDrag(handle('start'), 26);
+      check(tcell('finish').value === fin0 && tcell('start').value > start0 && tcell('start').closest('.pinned')
+        && parseFloat(tcell('duration').value) === dur0 - 1,
+        `dragging the left end a day later pins the start (${start0} → ${tcell('start').value}), keeps the finish (${tcell('finish').value}), duration ${tcell('duration').value}`);
+      await click('undo');
+      await barDrag(handle('start'), 26 * 30);
+      check(tcell('finish').value === fin0 && parseFloat(tcell('duration').value) === 1, 'the left end stops at the finish (1 working day)');
+      await click('undo');
+      check(tcell('start').value === start0 && !tcell('start').closest('.pinned'), 'undo removes the pin');
+
+      const html = d.documentElement, bg = () => w.getComputedStyle(d.body).backgroundColor;
+      const setTheme = async v => {
+        d.getElementById('btn-settings').click(); await sleep(30);
+        const f = d.getElementById('settings-form');
+        f.theme.value = v;
+        f.querySelector('button[value="save"]').click(); await sleep(60);
+      };
+      await setTheme('dark');
+      check(html.dataset.theme === 'dark' && bg() === 'rgb(21, 25, 34)', `Settings → Theme Dark applies dark colors (${bg()})`);
+      const { STORAGE_NS } = await import('../js/config.js'); // collab keeps its own storage namespace
+      check(JSON.parse(w.localStorage.getItem(`${STORAGE_NS}.prefs`)).theme === 'dark', 'theme saved as a browser preference');
+      await setTheme('light');
+      check(html.dataset.theme === 'light' && bg() === 'rgb(255, 255, 255)', 'Theme Light applies light colors');
+      await setTheme('auto');
+      check(!('theme' in html.dataset), 'Theme “Match the system” removes the override');
+
       // ---- Export menu ----
       const menuBtn = d.getElementById('btn-export-menu'), menu = d.getElementById('export-menu');
       check(!d.querySelector('.actions #btn-png') && !d.querySelector('.actions #btn-share') && !d.querySelector('.actions #btn-export'),
@@ -350,8 +410,8 @@
       // ---- Open menu: CSV / JSON import ----
       const openBtn = d.getElementById('btn-open-menu'), openMenu = d.getElementById('open-menu');
       openBtn.click(); await sleep(30);
-      check(!openMenu.hidden && [...openMenu.querySelectorAll('[role="menuitem"] b')].map(b => b.textContent).join('|') === 'JSON file|CSV file',
-        'Open menu offers JSON file and CSV file');
+      check(!openMenu.hidden && [...openMenu.querySelectorAll('[role="menuitem"] b')].map(b => b.textContent).join('|') === 'JSON file|Excel file (.xlsx)|CSV file',
+        'Open menu offers JSON, Excel, and CSV files');
       d.getElementById('btn-import-csv').click(); await sleep(20);
       check(openMenu.hidden && d.getElementById('file-input').accept.includes('.csv'), 'CSV item opens a CSV file picker');
       const feed = async (name, text) => {
@@ -359,8 +419,13 @@
         dt.items.add(new w.File([text], name, { type: 'text/csv' }));
         const inp = d.getElementById('file-input');
         inp.files = dt.files;
+        // Reading the file is asynchronous; every import ends in a message or
+        // the error dialog, so wait for one rather than a fixed delay
+        const toastEl = d.getElementById('toast'), dlg = d.getElementById('dlg-import-error');
+        toastEl.textContent = '';
         inp.dispatchEvent(new w.Event('change', { bubbles: true }));
-        await sleep(150);
+        for (let t0 = Date.now(); !toastEl.textContent && !dlg.open && Date.now() - t0 < 5000;) await sleep(20);
+        await sleep(30);
       };
       const planBefore = d.getElementById('plan-name').textContent;
       await feed('Garden.csv', 'WBS,Task,Duration,Predecessors\n1,Prep,,\n1.1,Dig beds,3,\n1.2,Plant,2,2SS\n2,Harvest,0,3\n');
@@ -388,6 +453,71 @@
       // JSON still opens through the same picker
       await feed('rt.json', JSON.stringify({ name: 'From JSON', start: '2026-10-05', tasks: [{ id: 1, name: 'Only task', duration: 2, preds: [] }] }));
       check(d.getElementById('plan-name').textContent === 'From JSON' && count() === 1, 'JSON file still opens');
+      // ---- Open → Excel file ----
+      check([...openMenu.querySelectorAll('[role="menuitem"] b')].map(b => b.textContent).join('|') === 'JSON file|Excel file (.xlsx)|CSV file',
+        'Open menu offers JSON, Excel, and CSV');
+      const xbuf = await (await fetch('fixtures/plan.xlsx')).arrayBuffer();
+      const { readXlsx } = await import('../js/xlsx.js');
+      const sheets = await readXlsx(xbuf);
+      check(sheets.map(s => s.name).join() === 'Notes,Schedule' && sheets[1].rows[2].join('|') === 'WBS|Task|Duration||Depends on|% complete|Owner|Pinned start|Start',
+        'reader: both sheets, header row with the skipped column kept in place');
+      check(sheets[1].rows[7][1] === 'Fabricate chassis' && sheets[1].rows[5][1] === 'Concept selection',
+        'reader: rich-text and inline strings');
+      check(sheets[1].rows[3][8] === '2026-10-05' && sheets[1].rows[5][7] === '2026-10-07' && sheets[1].rows[4][5] === '40' && sheets[1].rows[5][5] === '12.5' && sheets[1].rows[4][2] === '5',
+        `reader: custom and built-in dates, percents, formula value (${sheets[1].rows[3][8]}, ${sheets[1].rows[5][7]}, ${sheets[1].rows[4][5]}%, ${sheets[1].rows[5][5]}%)`);
+      await feed('Senior plan.xlsx', xbuf);
+      const xnames = [...d.querySelectorAll('#tbody input[data-f="name"]')].map(i => i.value);
+      check(d.getElementById('plan-name').textContent === 'Senior plan' && xnames.join('|') === 'Planning|Define requirements|Concept selection|Build & test|Fabricate chassis',
+        `Excel file imports the “Schedule” sheet as a new plan (${xnames.length} tasks)`);
+      check(row(1).classList.contains('summary') && row(4).classList.contains('summary') && cell(2, 'duration').value === '5' && cell(2, 'pct').value === '40' && cell(3, 'pct').value === '13',
+        'outline from WBS numbers; formula duration; percentages');
+      check(cell(3, 'preds').value === '2SS' && cell(5, 'preds').value === '3' && cell(3, 'start').value === '2026-10-07' && row(3).querySelector('.c-date.pinned'),
+        'links by line order (2SS, 3) and the pinned start date');
+      check(/Schedule/.test(d.getElementById('toast').textContent) && /non-numeric/.test(d.getElementById('toast').textContent),
+        `toast names the sheet and flags the TRUE/FALSE cell (“${d.getElementById('toast').textContent.slice(0, 80)}…”)`);
+      // The import summary stays up (30 s) until clicked
+      const tEl = d.getElementById('toast');
+      await sleep(3000);
+      check(tEl.classList.contains('show') && tEl.classList.contains('sticky'), 'the import message is still showing after 3 s (ordinary messages go after 2.5 s)');
+      tEl.click(); await sleep(50);
+      check(!tEl.classList.contains('show'), 'clicking the import message closes it');
+      await click('undo'); // an ordinary message ("Nothing to undo") is not sticky
+      check(!tEl.classList.contains('sticky') && getComputedStyle(tEl).pointerEvents === 'none', 'ordinary messages stay unclickable and short-lived');
+      // Failures explain themselves and offer the template
+      await feed('old.xls', new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).buffer);
+      check(d.getElementById('dlg-import-error').open && /old-style Excel file/.test(d.getElementById('import-error-msg').textContent),
+        'an old .xls file gets “save as .xlsx” advice');
+      d.getElementById('dlg-import-error').close();
+      await feed('fake.xlsx', 'PK this is not really a zip');
+      check(d.getElementById('dlg-import-error').open && /not an Excel workbook/.test(d.getElementById('import-error-msg').textContent),
+        `a damaged workbook is reported (“${d.getElementById('import-error-msg').textContent}”)`);
+      d.getElementById('dlg-import-error').close();
+
+      // ---- Templates offered after a failed import ----
+      const tplFirst = () => d.querySelector('#template-buttons button');
+      await feed('fake.xlsx', 'PK this is not really a zip');
+      check(tplFirst().id === 'btn-xlsx-template' && tplFirst().classList.contains('primary') && !d.getElementById('btn-csv-template').classList.contains('primary'),
+        'after a failed Excel import, the Excel template is offered first');
+      const xtpl = new Promise(resolve => {
+        const oc = w.HTMLAnchorElement.prototype.click, ou = w.URL.createObjectURL;
+        let blob = null;
+        w.URL.createObjectURL = b => { blob = b; return ou.call(w.URL, b); };
+        w.HTMLAnchorElement.prototype.click = function () { w.HTMLAnchorElement.prototype.click = oc; w.URL.createObjectURL = ou; resolve({ name: this.download, blob }); };
+      });
+      d.getElementById('btn-xlsx-template').click();
+      const xt = await Promise.race([xtpl, sleep(3000).then(() => null)]);
+      check(xt && xt.name === 'project-planner-template.xlsx' && /spreadsheetml/.test(xt.blob.type) && !d.getElementById('dlg-import-error').open,
+        `Excel template downloads (${xt?.name}, ${xt?.blob.size} bytes) and the dialog closes`);
+      const tsheets = await readXlsx(await xt.blob.arrayBuffer());
+      check(tsheets.length === 1 && tsheets[0].name === 'Tasks' && tsheets[0].rows[0][2] === 'Task' && tsheets[0].rows[4][4] === '3',
+        'the template reads back: one “Tasks” sheet, header and numbers intact');
+      await feed('project-planner-template.xlsx', await xt.blob.arrayBuffer());
+      check(d.getElementById('plan-name').textContent === 'project-planner-template' && count() === 6 && cell(4, 'preds').value === '3SS' && cell(5, 'duration').value === '0',
+        'the Excel template itself imports (6 tasks, 3SS link, milestone)');
+      await feed('broken.csv', 'Foo,Bar\n1,2\n');
+      check(tplFirst().id === 'btn-csv-template' && tplFirst().classList.contains('primary'), 'after a failed CSV import, the CSV template is offered first');
+      d.getElementById('dlg-import-error').close();
+
       // Back to the example plan used by the remaining tests
       d.getElementById('btn-plans').click(); await sleep(40);
       const li = [...d.querySelectorAll('#plan-list li')].find(l => l.textContent.includes(planBefore));

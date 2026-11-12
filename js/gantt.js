@@ -6,10 +6,15 @@
 import { toISO, todayDay, dayOfWeek } from './calendar.js';
 import { linkDrives } from './schedule.js';
 
-export const ROW = 26;
+export const ROW = 34;
 const HEAD = 44;
 export const LABEL_W = 280; // task-name column default; user-resizable, narrower on phones (labelW options)
-const ZOOM_PX = { day: 26, week: 9, month: 3 };
+// Pixels per day for the Days/Weeks/Months presets; Zoom −/+ step between
+// and beyond them. The header style follows the scale (headerMode).
+export const ZOOM_PX = { day: 26, week: 9, month: 3 };
+export const ZOOM_MIN = 1, ZOOM_MAX = 96;
+export const zoomPx = z => (typeof z === 'number' && z > 0 ? z : ZOOM_PX[z] || ZOOM_PX.day);
+export const headerMode = px => (px >= 16 ? 'day' : px >= 5 ? 'week' : 'month');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function esc(s) {
@@ -24,8 +29,8 @@ function visible(plan, sched, hidden) {
   return sched.rows.map((r, i) => ({ r, t: plan.tasks[i] })).filter(({ r }) => !hidden.has(r.id));
 }
 
-function layout(sched, zoom, nRows) {
-  const px = ZOOM_PX[zoom] || ZOOM_PX.day;
+function layout(sched, z, nRows) {
+  const px = zoomPx(z), zoom = headerMode(px);
   let from = sched.startDay - 3;
   let to = sched.finishDay + 10;
   if (zoom !== 'day') { while (dayOfWeek(from) !== 1) from--; }
@@ -35,10 +40,11 @@ function layout(sched, zoom, nRows) {
   }
   const width = Math.max(600, (to - from) * px);
   const height = Math.max(nRows, 1) * ROW;
-  return { px, from, to, width, height, x: n => (n - from) * px };
+  return { px, zoom, from, to, width, height, x: n => (n - from) * px };
 }
 
-function header(L, zoom, cal) {
+function header(L, cal) {
+  const { zoom } = L;
   const out = [];
   out.push(`<rect class="g-head-bg" x="0" y="0" width="${L.width}" height="${HEAD}"/>`);
   // Top band: months (or years in month zoom)
@@ -81,19 +87,19 @@ function labels(vis, selectedId, LW = LABEL_W) {
   const chars = Math.floor((LW - 48) / 7); // name characters that fit at level 0
   const out = [`<rect class="g-label-bg" x="0" y="0" width="${LW}" height="${Math.max(vis.length, 1) * ROW}"/>`];
   vis.forEach(({ r, t }, i) => {
-    const y = i * ROW;
+    const y = i * ROW, ty = y + ROW / 2 + 4;
     const x = 36 + r.level * 14;
     const twisty = r.summary
-      ? `<text class="g-twisty" data-act="toggle" x="${x + 4}" y="${y + 17}" text-anchor="middle" data-tip="${t.collapsed ? 'Expand' : 'Collapse'} (or double-click the row)">${t.collapsed ? '▸' : '▾'}</text>`
+      ? `<text class="g-twisty" data-act="toggle" x="${x + 4}" y="${ty}" text-anchor="middle" data-tip="${t.collapsed ? 'Expand' : 'Collapse'} (or double-click the row)">${t.collapsed ? '▸' : '▾'}</text>`
       : '';
     const cls = ['g-label', r.summary ? 'summary' : '', !r.summary && r.critical ? 'critical' : '', !r.summary && r.near ? 'near' : '', r.id === selectedId ? 'selected' : ''].join(' ');
     const warn = r.issues.length ? `<tspan class="g-warn" data-tip="${esc(r.issues.join('\n'))}">⚠</tspan> ` : '';
     const pin = r.pinned ? ` <tspan class="g-pin" data-tip="Pinned start date: ${r.start}. The task stays there instead of following its predecessors.">📌</tspan>` : '';
     out.push(`<g class="g-row" data-id="${r.id}">`
       + `<rect class="g-row-bg${r.id === selectedId ? ' selected' : ''}" x="0" y="${y}" width="${LW}" height="${ROW}"/>`
-      + `<text class="g-rownum" x="26" y="${y + 17}" text-anchor="end">${r.row}</text>`
+      + `<text class="g-rownum" x="26" y="${ty}" text-anchor="end">${r.row}</text>`
       + twisty
-      + `<text class="${cls}" x="${x + 12}" y="${y + 17}">${warn}${esc(truncate(t.name || '(unnamed)', chars - r.level * 2))}${pin}</text>`
+      + `<text class="${cls}" x="${x + 12}" y="${ty}">${warn}${esc(truncate(t.name || '(unnamed)', chars - r.level * 2))}${pin}</text>`
       + `</g>`);
   });
   return out.join('');
@@ -103,7 +109,7 @@ function truncate(s, n) {
   return s.length > n ? s.slice(0, Math.max(n - 1, 4)) + '…' : s;
 }
 
-function body(sched, vis, hidden, L, selectedId) {
+function body(sched, vis, hidden, L, selectedId, editable = false) {
   const out = [];
   const rows = vis.map(v => v.r);
   // Row stripes and selection
@@ -199,16 +205,13 @@ function body(sched, vis, hidden, L, selectedId) {
     const conflict = r.issues.length ? ' conflict' : '';
     let shape;
     if (r.summary) {
-      const y = g.top + 8, h = 6, x1 = g.x1, x2 = Math.max(g.x2, x1 + 2);
+      const y = g.mid - 5, h = 6, x1 = g.x1, x2 = Math.max(g.x2, x1 + 2);
       shape = `<path class="g-summary" d="M${x1},${y} H${x2} V${y + h + 5} L${x2 - 5},${y + h} H${x1 + 5} L${x1},${y + h + 5} Z"/>`;
     } else if (r.milestone) {
-      const x = (g.x1 + g.x2) / 2, y = g.mid, s = 7;
+      const x = (g.x1 + g.x2) / 2, y = g.mid, s = 8;
       shape = `<path class="g-milestone${r.critical ? ' critical' : r.near ? ' near' : ''}${conflict}" d="M${x},${y - s} L${x + s},${y} L${x},${y + s} L${x - s},${y} Z"/>`;
     } else {
-      const y = g.top + 6, h = ROW - 12, w = Math.max(g.x2 - g.x1, 2);
-      const pw = w * r.pct / 100;
-      shape = `<rect class="g-bar${r.critical ? ' critical' : r.near ? ' near' : ''}${conflict}" x="${g.x1}" y="${y}" width="${w}" height="${h}" rx="2"/>`
-        + (pw > 0 ? `<rect class="g-progress${r.critical ? ' critical' : r.near ? ' near' : ''}" x="${g.x1}" y="${y + h / 2 - 2}" width="${pw}" height="4"/>` : '');
+      shape = barShape(r, g, conflict, editable);
     }
     const note = t.assignee ? `<text class="g-bar-text" x="${g.x2 + (ffEnds.has(r.id) ? 14 : 6)}" y="${g.mid + 4}">${esc(t.assignee)}</text>` : '';
     out.push(`<g class="g-task" data-id="${r.id}" data-tip="${tip}">${shape}${note}</g>`);
@@ -216,14 +219,43 @@ function body(sched, vis, hidden, L, selectedId) {
   return out.join('');
 }
 
+// A task bar: translucent track with a solid outline, the done part filled
+// solid (with a light sheen) from the left, and the % written inside it.
+const BAR_H = 20, BAR_R = 3;
+function barShape(r, g, conflict, editable) {
+  const kind = r.critical ? ' critical' : r.near ? ' near' : '';
+  const y = g.mid - BAR_H / 2, h = BAR_H, x = g.x1, w = Math.max(g.x2 - g.x1, 2);
+  const pw = w * r.pct / 100;
+  const out = [`<rect class="g-bar${kind}${conflict}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${BAR_R}"/>`];
+  if (pw > 0) {
+    const rr = Math.min(BAR_R, pw / 2);
+    const d = pw >= w - 0.5
+      ? `M${x + rr},${y} H${x + w - rr} Q${x + w},${y} ${x + w},${y + rr} V${y + h - rr} Q${x + w},${y + h} ${x + w - rr},${y + h} H${x + rr} Q${x},${y + h} ${x},${y + h - rr} V${y + rr} Q${x},${y} ${x + rr},${y} Z`
+      : `M${x + rr},${y} H${x + pw} V${y + h} H${x + rr} Q${x},${y + h} ${x},${y + h - rr} V${y + rr} Q${x},${y} ${x + rr},${y} Z`;
+    out.push(`<path class="g-progress${kind}" d="${d}"/><path class="g-sheen" d="${d}" fill="url(#g-sheen)"/>`);
+    // Label inside the solid part if it fits, else just after it in the track
+    const label = `${r.pct}%`, tw = label.length * 6.5 + 8;
+    if (pw >= tw) out.push(`<text class="g-pct${kind}" x="${x + pw - 4}" y="${g.mid + 3.5}" text-anchor="end">${label}</text>`);
+    else if (w - pw >= tw) out.push(`<text class="g-pct out${kind}" x="${x + pw + 4}" y="${g.mid + 3.5}">${label}</text>`);
+  }
+  if (editable) {
+    // Grab areas on each end: drag to change the start (pins it) or the finish
+    const hw = Math.min(8, Math.max(4, w / 3));
+    out.push(`<rect class="g-handle" data-edge="start" x="${x - hw / 2}" y="${y - 2}" width="${hw}" height="${h + 4}"/>`
+      + `<rect class="g-handle" data-edge="end" x="${x + w - hw / 2}" y="${y - 2}" width="${hw}" height="${h + 4}"/>`);
+  }
+  return out.join('');
+}
+
 const DEFS = `<defs>
+  <linearGradient id="g-sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".08"/></linearGradient>
   <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="g-arrowhead" d="M0,0 L8,4 L0,8 Z"/></marker>
   <marker id="arrow-near" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="g-arrowhead near" d="M0,0 L8,4 L0,8 Z"/></marker>
   <marker id="arrow-crit" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="g-arrowhead critical" d="M0,0 L8,4 L0,8 Z"/></marker>
 </defs>`;
 
 // Render into a container element. Returns nothing; call again on change.
-export function renderGantt(container, plan, sched, { zoom = 'day', selectedId = null, hidden = new Set(), labelW = LABEL_W } = {}) {
+export function renderGantt(container, plan, sched, { zoom = 'day', selectedId = null, hidden = new Set(), labelW = LABEL_W, editable = false } = {}) {
   const LW = labelW;
   const vis = visible(plan, sched, hidden);
   const L = layout(sched, zoom, vis.length);
@@ -232,9 +264,9 @@ export function renderGantt(container, plan, sched, { zoom = 'day', selectedId =
     <div class="gantt-grid" style="grid-template-columns:${LW}px ${L.width}px">
       <div class="g-corner"><svg width="${LW}" height="${HEAD}"><rect class="g-head-bg" width="${LW}" height="${HEAD}"/>
         <text class="g-head-text" x="10" y="${HEAD - 10}">Task</text></svg></div>
-      <div class="g-head"><svg width="${L.width}" height="${HEAD}">${header(L, zoom, sched.cal)}</svg></div>
+      <div class="g-head"><svg width="${L.width}" height="${HEAD}">${header(L, sched.cal)}</svg></div>
       <div class="g-labels"><svg width="${LW}" height="${H}">${labels(vis, selectedId, LW)}</svg></div>
-      <div class="g-body"><svg width="${L.width}" height="${H}">${DEFS}${body(sched, vis, hidden, L, selectedId)}</svg></div>
+      <div class="g-body"><svg width="${L.width}" height="${H}">${DEFS}${body(sched, vis, hidden, L, selectedId, editable)}</svg></div>
     </div>`;
 }
 
@@ -244,6 +276,12 @@ export function scrollToDay(container, sched, zoom, day) {
   container.scrollLeft = Math.max(0, L.x(day) - 2 * L.px);
 }
 
+// Chart x (px from the left of the time axis) <-> day number, for dragging bar ends
+export function ganttScale(sched, zoom) {
+  const L = layout(sched, zoom, 0);
+  return { px: L.px, x: L.x, dayAt: x => L.from + x / L.px };
+}
+
 function wholeChart(plan, sched, zoom, hidden, LW = LABEL_W) {
   const vis = visible(plan, sched, hidden);
   const L = layout(sched, zoom, vis.length);
@@ -251,7 +289,7 @@ function wholeChart(plan, sched, zoom, hidden, LW = LABEL_W) {
   const inner = `${DEFS}
     <g transform="translate(${LW},${HEAD})">${body(sched, vis, hidden, L, null)}</g>
     <g transform="translate(0,${HEAD})">${labels(vis, null, LW)}</g>
-    <g transform="translate(${LW},0)">${header(L, zoom, sched.cal)}</g>
+    <g transform="translate(${LW},0)">${header(L, sched.cal)}</g>
     <rect class="g-head-bg" width="${LW}" height="${HEAD}"/><text class="g-head-text" x="10" y="${HEAD - 10}">Task</text>`;
   return { W, H, inner };
 }

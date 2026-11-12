@@ -57,6 +57,34 @@
   }
 }
 
+:root[data-theme="dark"] {
+  --bg: #151922;
+  --bg-alt: #1b202b;
+  --bg-head: #222836;
+  --fg: #e6e9ef;
+  --fg-muted: #9aa3b2;
+  --border: #343b4a;
+  --grid: #2a3040;
+  --accent: #6b9cff;
+  --accent-soft: #24365c;
+  --select: #3a3418;
+  --bar: #5b8cf0;
+  --bar-dark: #c7d7ff;
+  --crit: #f05252;
+  --crit-dark: #ffd0d0;
+  --crit-soft: #4a1d1f;
+  --near: #f5a524;
+  --near-text: #fb923c;
+  --near-soft: #45290f;
+  --summary: #e6e9ef;
+  --link: #7c869a;
+  --nonwork: #1f2430;
+  --warn: #f59e0b;
+  --today: #22c55e;
+  --pinned: #3b3217;
+  color-scheme: dark;
+}
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
@@ -104,10 +132,13 @@ code { background: var(--bg-alt); padding: 0 4px; border-radius: 4px; }
 #gantt-wrap { position: relative; display: flex; flex-direction: column; min-height: 0; }
 #gantt-wrap > #gantt-pane { flex: 1; }
 #gantt-wrap > .zoom {
+  flex-direction: column; align-items: stretch; gap: 4px;
   position: absolute; top: 7px; right: calc(var(--sbw, 0px) + 8px); z-index: 5;
-  background: var(--bg-head); padding: 2px 2px 2px 8px; border-radius: 6px;
+  background: var(--bg-head); padding: 3px 3px 3px 8px; border-radius: 6px;
   box-shadow: 0 0 0 1px var(--border);
 }
+.zoom-steps { display: flex; gap: 4px; justify-content: flex-end; }
+.zoom-steps button { padding: 0 8px; min-width: 28px; line-height: 20px; font-size: 15px; font-weight: 600; }
 .zoom select { padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 
 .banner {
@@ -221,15 +252,24 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .g-grid { stroke: var(--grid); stroke-width: 1; }
 .g-today { stroke: var(--today); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .g-task { cursor: pointer; }
-.g-bar { fill: var(--bar); }
-.g-bar.critical { fill: var(--crit); }
-.g-bar.near { fill: var(--near); }
+.g-bar { fill: var(--bar); fill-opacity: .18; stroke: var(--bar); stroke-width: 1.2; }
+.g-bar.critical { fill: var(--crit); stroke: var(--crit); }
+.g-bar.near { fill: var(--near); stroke: var(--near); }
 .g-bar.conflict, .g-milestone.conflict { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 3 2; }
-.g-progress { fill: var(--bar-dark); }
-.g-progress.critical { fill: var(--crit-dark); }
-.g-progress.near { fill: var(--near-text); }
+.g-progress { fill: var(--bar); }
+.g-progress.critical { fill: var(--crit); }
+.g-progress.near { fill: var(--near); }
+.g-sheen { pointer-events: none; }
+.g-pct { fill: #fff; font-size: 10.5px; font-weight: 700; font-family: var(--font); pointer-events: none; }
+.g-pct.near { fill: #3b2300; }
+.g-pct.out { fill: var(--bar-dark); }
+.g-pct.out.critical { fill: var(--crit-dark); }
+.g-pct.out.near { fill: var(--near-text); }
+.g-handle { fill: transparent; cursor: ew-resize !important; touch-action: none; }
+.g-task:hover .g-handle { fill: var(--fg); fill-opacity: .12; }
+body.bar-dragging, body.bar-dragging * { cursor: ew-resize !important; user-select: none !important; }
 .g-summary { fill: var(--summary); }
-.g-milestone { fill: var(--summary); }
+.g-milestone { fill: var(--summary); stroke: var(--bg); stroke-width: 1; }
 .g-milestone.critical { fill: var(--crit); }
 .g-milestone.near { fill: var(--near); }
 .g-link { fill: none; stroke: var(--link); stroke-width: 1.3; }
@@ -262,6 +302,7 @@ fieldset.weekend legend { font-weight: 600; padding: 0 4px; }
 dialog label.check { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-weight: 400; }
 dialog label.check input { display: inline-block; width: auto; margin: 0; }
 dialog label.check { flex-wrap: wrap; }
+dialog label.check select.theme-in { padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-weight: 400; }
 dialog label.check input.num-in { width: 5em; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 dialog::backdrop { background: rgb(0 0 0 / .35); }
 dialog h2 { margin: 0 0 12px; font-size: 18px; }
@@ -292,6 +333,8 @@ dialog label input, dialog label textarea, #share-url {
 }
 #toast.show { opacity: 1; transform: translateX(-50%); }
 #toast.error { background: var(--crit); color: #fff; }
+#toast.sticky { pointer-events: auto; cursor: pointer; padding-right: 32px; }
+#toast.sticky::after { content: '✕'; position: absolute; right: 12px; top: 8px; opacity: .8; }
 
 #tip {
   position: fixed; z-index: 60; max-width: 320px; pointer-events: none;

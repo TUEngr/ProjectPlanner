@@ -2,7 +2,7 @@
 
 import { parseISO, toISO } from './calendar.js';
 import { schedule, durationBetween, linksOf, hiddenIds, nearCriticalDays } from './schedule.js';
-import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, esc, LABEL_W } from './gantt.js';
+import { renderGantt, ganttPrintSVG, ganttStandaloneSVG, scrollToDay, ganttScale, esc, LABEL_W, ZOOM_PX, ZOOM_MIN, ZOOM_MAX } from './gantt.js';
 import { renderTable, renderTableHead, parseDuration, parsePredList, COLUMNS, columnWidths, applyColumnWidths } from './table.js';
 import * as store from './storage.js';
 import { samplePlan } from './sample.js';
@@ -41,7 +41,8 @@ const state = {
   ganttLabelW: null, // Gantt task-name column width the user dragged, or default
   hidden: new Set(), // ids of rows inside collapsed summaries (recomputed by render)
   view: 'split',
-  zoom: 'day',
+  zoom: ZOOM_PX.day, // Gantt scale, pixels per day (presets in ZOOM_PX; Zoom −/+ step between)
+  theme: 'auto',     // 'auto' (follow the system), 'light' or 'dark'
   undo: [],
   redo: [],
 };
@@ -52,15 +53,45 @@ function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
     if (VIEWS.includes(p.view)) state.view = p.view;
-    if (['day', 'week', 'month'].includes(p.zoom)) state.zoom = p.zoom;
+    if (Number.isFinite(p.zoomPx)) state.zoom = clampZoom(p.zoomPx);
+    else if (Object.hasOwn(ZOOM_PX, p.zoom)) state.zoom = ZOOM_PX[p.zoom]; // prefs saved before Zoom −/+
+    if (['auto', 'light', 'dark'].includes(p.theme)) state.theme = p.theme;
     if (p.colW && typeof p.colW === 'object') state.colW = p.colW;
     if (Number.isFinite(p.ganttLabelW)) state.ganttLabelW = clampLabelW(p.ganttLabelW);
   } catch { /* defaults */ }
 }
 function savePrefs() {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ view: state.view, zoom: state.zoom, colW: state.colW, ganttLabelW: state.ganttLabelW }));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ view: state.view, zoomPx: state.zoom, theme: state.theme, colW: state.colW, ganttLabelW: state.ganttLabelW }));
   } catch { /* ignore */ }
+}
+
+// Light or dark: an explicit choice sets data-theme on <html>; 'auto' leaves
+// it off so the stylesheet follows prefers-color-scheme.
+function applyTheme() {
+  if (state.theme === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = state.theme;
+}
+
+// ---------- Gantt zoom (per browser) ----------
+const ZOOM_STEP = 1.25;
+const clampZoom = px => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(px * 100) / 100));
+// The dropdown names the preset in use, or Custom after Zoom −/+
+const zoomPreset = px => Object.keys(ZOOM_PX).find(k => Math.abs(ZOOM_PX[k] - px) < 0.01) ?? 'custom';
+
+// Zoom in (dir > 0) or out, keeping the date at the middle of the chart in place.
+function stepZoom(dir) {
+  const pane = $('#gantt-pane');
+  const half = (pane.clientWidth - ganttLabelW()) / 2;
+  const mid = ganttScale(state.sched, state.zoom).dayAt(pane.scrollLeft + half);
+  let px = clampZoom(state.zoom * (dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP));
+  // Land exactly on a preset when a step passes close to it
+  for (const v of Object.values(ZOOM_PX)) if (Math.abs(px - v) / v < 0.08) px = v;
+  if (px === state.zoom) return;
+  state.zoom = px;
+  savePrefs();
+  render();
+  pane.scrollLeft = Math.max(0, ganttScale(state.sched, state.zoom).x(mid) - half);
 }
 
 // ---------- column widths (per browser) ----------
@@ -357,7 +388,8 @@ function render({ scrollGantt = false } = {}) {
     ? `The ${KIND_LABEL[kind]}${kind === 'gantt' ? ' at the current zoom' : ''}, for reports and slides`
     : 'No chart: turn on Gantt or PERT in Settings';
   $('#print-kind').textContent = kind ? `The ${KIND_LABEL[kind]}, or save it as a PDF` : 'No chart: turn on Gantt or PERT in Settings';
-  $('#zoom').value = state.zoom;
+  $('#zoom').value = zoomPreset(state.zoom);
+  $('#zoom').querySelector('[value="custom"]').hidden = zoomPreset(state.zoom) !== 'custom';
 
   renderTable($('#tbody'), plan, state.sched, { selectedId: state.selectedId, readOnly: state.readOnly, hidden: state.hidden });
   applyColumnWidths($('table.tasks'), columnWidths(state.colW));
@@ -368,7 +400,9 @@ function render({ scrollGantt = false } = {}) {
     renderPert(pp, plan, state.sched, { selectedId: state.selectedId, hidden: state.hidden });
     pp.scrollLeft = keep.left; pp.scrollTop = keep.top;
   }
-  $('#zoom').disabled = showsPert(); // the network diagram has no time scale
+  for (const el of [$('#zoom'), $('#zoom-in'), $('#zoom-out')]) el.disabled = showsPert(); // the network diagram has no time scale
+  $('#zoom-in').disabled ||= state.zoom >= ZOOM_MAX;
+  $('#zoom-out').disabled ||= state.zoom <= ZOOM_MIN;
 
   if (focusRow && focusField) {
     const el = document.querySelector(`#tbody tr[data-id="${focusRow}"] input[data-f="${focusField}"]`);
@@ -384,7 +418,7 @@ function drawGantt({ scrollGantt = false } = {}) {
   const pane = $('#gantt-pane');
   const { scrollLeft, scrollTop } = pane;
   const LW = ganttLabelW();
-  renderGantt(pane, state.plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden, labelW: LW });
+  renderGantt(pane, state.plan, state.sched, { zoom: state.zoom, selectedId: state.selectedId, hidden: state.hidden, labelW: LW, editable: !state.readOnly });
   // Keep the floating zoom control clear of the pane's vertical scrollbar
   $('#gantt-wrap').style.setProperty('--sbw', `${pane.offsetWidth - pane.clientWidth}px`);
   $('#gantt-rs').style.left = `${LW}px`;
@@ -488,6 +522,86 @@ function select(id) {
   document.querySelectorAll('#pert-pane .pt-node.selected').forEach(el => el.classList.remove('selected'));
   document.querySelector(`#pert-pane .pt-node[data-id="${id}"]`)?.classList.add('selected');
   syncDrawerSelection();
+}
+
+// ---------- dragging Gantt bar ends ----------
+// The left end sets a pinned start and keeps the finish (duration changes);
+// the right end sets the finish (duration changes). Both snap to working days.
+
+function showTipText(text, x, y) {
+  const tip = $('#tip');
+  tip.textContent = text;
+  tip.hidden = false;
+  const t = tip.getBoundingClientRect();
+  tip.style.left = `${Math.min(Math.max(8, x - t.width / 2), window.innerWidth - t.width - 8)}px`;
+  tip.style.top = `${Math.max(8, y - t.height - 14)}px`;
+}
+
+function wireBarDrag() {
+  const pane = $('#gantt-pane');
+  // Capture phase, so the row-reorder drag on the same pane never sees it
+  pane.addEventListener('pointerdown', e => {
+    const h = e.target.closest?.('.g-handle');
+    if (!h || e.button !== 0 || state.readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const id = Number(h.closest('.g-task').dataset.id);
+    const row = state.sched.byId.get(id);
+    if (!row || row.summary || row.milestone) return;
+    select(id);
+    const edge = h.dataset.edge, cal = state.sched.cal;
+    const S = ganttScale(state.sched, state.zoom);
+    const svg = h.ownerSVGElement, task = h.parentNode, bar = task.querySelector('.g-bar');
+    const x1 = S.x(row.startDay), x2 = S.x(row.finishDay + 1);
+    let day = null;
+    try { h.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    document.body.classList.add('bar-dragging');
+    task.querySelectorAll('.g-progress, .g-sheen, .g-pct').forEach(el => { el.style.display = 'none'; });
+
+    const move = ev => {
+      const at = S.dayAt(ev.clientX - svg.getBoundingClientRect().left);
+      let text;
+      if (edge === 'start') {
+        let d = Math.min(Math.round(at), row.finishDay);
+        while (!cal.isWorkday(d)) d++; // finishDay is a workday, so this stops by then
+        day = d;
+        bar.setAttribute('x', S.x(d));
+        bar.setAttribute('width', Math.max(x2 - S.x(d), 2));
+        const n = durationBetween(cal, d, row.finishDay);
+        text = `Start ${fmtDate(toISO(d))} (pinned) · ${n} working day${n === 1 ? '' : 's'}`;
+      } else {
+        let d = Math.max(Math.round(at) - 1, row.startDay);
+        while (!cal.isWorkday(d)) d--; // startDay is a workday
+        day = d;
+        bar.setAttribute('width', Math.max(S.x(d + 1) - x1, 2));
+        const n = durationBetween(cal, row.startDay, d);
+        text = `Finish ${fmtDate(toISO(d))} · ${n} working day${n === 1 ? '' : 's'}`;
+      }
+      showTipText(text, ev.clientX, bar.getBoundingClientRect().top);
+    };
+    const up = ev => {
+      h.removeEventListener('pointermove', move);
+      h.removeEventListener('pointerup', up);
+      h.removeEventListener('pointercancel', up);
+      document.body.classList.remove('bar-dragging');
+      hideTip();
+      const changed = ev.type === 'pointerup' && day !== null
+        && (edge === 'start' ? day !== row.startDay : day !== row.finishDay);
+      if (!changed) { drawGantt(); return; }
+      commit(plan => {
+        const t = plan.tasks.find(x => x.id === id);
+        if (edge === 'start') {
+          t.manualStart = toISO(day);
+          t.duration = durationBetween(cal, day, row.finishDay);
+        } else {
+          t.duration = durationBetween(cal, row.startDay, day);
+        }
+      });
+    };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', up);
+    h.addEventListener('pointercancel', up);
+  }, { capture: true });
 }
 
 // ---------- cell edits ----------
@@ -724,6 +838,7 @@ function showSettings() {
   f.showPert.checked = pertOn();
   f.nearCritical.value = nearCriticalDays(state.plan);
   f.sunOff.checked = state.plan.sunOff !== false;
+  f.theme.value = state.theme;
   $('#dlg-settings').showModal();
 }
 
@@ -741,6 +856,11 @@ function saveSettings() {
     else holidays.push({ date, label: rest.join(' ') });
   }
   holidays.sort((a, b) => a.date.localeCompare(b.date));
+  if (f.theme.value !== state.theme) { // a browser preference, not part of the plan (no undo)
+    state.theme = f.theme.value;
+    applyTheme();
+    savePrefs();
+  }
   commit(plan => {
     plan.name = f.name.value.trim() || 'Untitled project';
     plan.start = start;
@@ -1044,10 +1164,14 @@ function wireEvents() {
     render();
   }));
   $('#zoom').addEventListener('change', e => {
-    state.zoom = e.target.value;
+    if (!Object.hasOwn(ZOOM_PX, e.target.value)) return;
+    state.zoom = ZOOM_PX[e.target.value];
     savePrefs();
     render({ scrollGantt: true });
   });
+  $('#zoom-in').addEventListener('click', () => stepZoom(+1));
+  $('#zoom-out').addEventListener('click', () => stepZoom(-1));
+  wireBarDrag();
 
   $('#plan-name').addEventListener('click', () => state.readOnly ? null : showSettings());
   $('#btn-settings').addEventListener('click', showSettings);
@@ -1171,7 +1295,7 @@ function wireEvents() {
   PHONE.addEventListener('change', () => render()); // rotating across the breakpoint resizes the Gantt name column
   window.addEventListener('afterprint', () => {
     $('#print-area').innerHTML = '';
-    delete document.documentElement.dataset.theme;
+    applyTheme(); // back from the light colors used for printing
   });
 }
 
@@ -1191,6 +1315,7 @@ async function loadFromHash() {
 
 async function init() {
   loadPrefs();
+  applyTheme();
   renderTableHead($('#thead'));
   wireResizing();
   wireEvents();

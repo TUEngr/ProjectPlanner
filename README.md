@@ -44,3 +44,4 @@ Tests:
 - `tests/index.html` runs the same tests in a browser.
 - `tests/ui.html` drives the real app in an iframe.
 - `tests/mobile.html` checks the phone layout in phone-sized frames (landscape and portrait).
+- `node tests/run-ui.mjs` runs `ui.html` and `mobile.html` in headless Chrome from the command line (Node 22+; set `CHROME` if Chrome isn't in the default location). It runs in real time with focus emulation; Chrome's `--virtual-time-budget` makes the import tests check too early.

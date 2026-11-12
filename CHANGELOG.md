@@ -4,6 +4,12 @@ What changed in each version of [Project Planner](https://tuengr.github.io/Proje
 
 Version numbers: the middle number goes up for new features, the last number for fixes and smaller improvements.
 
+## 1.11.0 — 2026-11-11
+- Settings → Appearance: choose a light or dark theme, or match the system setting. The choice is kept in this browser for all plans. Exports and printing still use light colors.
+- Redesigned Gantt bars: taller rows; each bar is a pale track with a solid outline, the done part is filled in solid, and the % complete is written inside it.
+- Zoom − and + buttons under the Zoom menu change the scale in smaller steps; the menu shows Custom between Days, Weeks, and Months.
+- Drag the ends of a Gantt bar to change its dates. The right end sets the finish (the duration changes). The left end sets a new start, which pins it 📌, and keeps the finish where it was. Both snap to working days, and Undo reverses them.
+
 ## 1.10.1 — 2026-10-07
 - The message after importing an Excel or CSV file now stays up for 30 seconds, or until you click it, so there's time to read it.
 
